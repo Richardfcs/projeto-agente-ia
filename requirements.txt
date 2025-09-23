@@ -1,0 +1,30 @@
+# Arquivo: requirements.txt
+
+# Framework Web
+Flask
+Flask-Cors
+
+# Banco de Dados
+pymongo[srv]
+
+# Autenticação (para as próximas seções)
+passlib[bcrypt]
+python-jose[cryptography]
+Flask-JWT-Extended
+
+# Processamento Assíncrono
+celery
+redis
+
+# Manipulação de Arquivos
+python-docx
+docxtpl
+openpyxl
+pandas
+reportlab
+
+# IA
+google-generativeai
+
+# Configuração
+python-dotenv
