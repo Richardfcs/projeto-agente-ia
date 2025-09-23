@@ -161,22 +161,22 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 
 **Objetivo:** Criar endpoints para upload e download de arquivos grandes.
 
-- [ ] **3.1. Modelos de Dados:** Definir as estruturas das coleções `templates` e `documents` no MongoDB.
-- [ ] **3.2. Endpoint de Upload de Template (`POST /api/templates/upload`):**
-    - [ ] Rota protegida (apenas para usuários autorizados/admins).
-    - [ ] Recebe um arquivo (ex: `.docx`, `.xlsx`).
-    - [ ] Salva o arquivo no GridFS.
-    - [ ] Cria um documento de metadados na coleção `templates` referenciando o `file_id` do GridFS.
-- [ ] **3.3. Endpoint de Upload de Documento (`POST /api/documents/upload`):**
-    - [ ] Rota protegida para usuários logados.
-    - [ ] Associa o documento ao `user_id` do usuário atual.
-    - [ ] Salva o arquivo no GridFS.
-    - [ ] Cria um documento de metadados na coleção `documents`.
-- [ ] **3.4. Endpoint de Download (`GET /api/files/<gridfs_file_id>`):**
-    - [ ] Rota protegida.
-    - [ ] Verifica se o usuário logado tem permissão para acessar o arquivo.
-    - [ ] Busca o arquivo no GridFS pelo seu ID.
-    - [ ] Retorna o arquivo para download (streaming).
+- [x] **3.1. Modelos de Dados:** Definir as estruturas das coleções `templates` e `documents` no MongoDB.
+- [x] **3.2. Endpoint de Upload de Template (`POST /api/templates/upload`):**
+    - [x] Rota protegida (apenas para usuários autorizados/admins).
+    - [x] Recebe um arquivo (ex: `.docx`, `.xlsx`).
+    - [x] Salva o arquivo no GridFS.
+    - [x] Cria um documento de metadados na coleção `templates` referenciando o `file_id` do GridFS.
+- [x] **3.3. Endpoint de Upload de Documento (`POST /api/documents/upload`):**
+    - [x] Rota protegida para usuários logados.
+    - [x] Associa o documento ao `user_id` do usuário atual.
+    - [x] Salva o arquivo no GridFS.
+    - [x] Cria um documento de metadados na coleção `documents`.
+- [x] **3.4. Endpoint de Download (`GET /api/files/<gridfs_file_id>`):**
+    - [x] Rota protegida.
+    - [x] Verifica se o usuário logado tem permissão para acessar o arquivo.
+    - [x] Busca o arquivo no GridFS pelo seu ID.
+    - [x] Retorna o arquivo para download (streaming).
 
 ---
 
