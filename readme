@@ -1,0 +1,106 @@
+# Projeto Agente de IA - Backend
+
+Este é o repositório do backend para o projeto Agente de IA. A aplicação é construída com Flask e utiliza o MongoDB como banco de dados, Celery para processamento assíncrono e a API do Google Gemini para as funcionalidades de inteligência artificial.
+
+## Pré-requisitos
+
+Antes de começar, garanta que você tenha os seguintes softwares instalados em sua máquina:
+
+- **Python** (versão 3.10 ou superior)
+- **Pip** (gerenciador de pacotes do Python)
+- **Git** (para clonar o repositório)
+- **MongoDB** (uma instância local ou uma conta no [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) para obter a string de conexão)
+- **Redis** (necessário para o Celery. A forma mais fácil de instalar localmente é via [Docker](https://www.docker.com/))
+
+## ⚙️ Instalação e Configuração
+
+Siga os passos abaixo para configurar o ambiente de desenvolvimento local.
+
+### 1. Clonar o Repositório
+
+Abra seu terminal e clone o projeto:
+
+```bash
+git clone https://sua-url-do-repositorio.git
+cd projeto-agente-ia
+2. Criar e Ativar o Ambiente Virtual
+
+É uma boa prática isolar as dependências do projeto em um ambiente virtual.
+
+Para macOS / Linux:
+
+python3 -m venv venv
+source venv/bin/activate
+
+Para Windows:
+
+python -m venv venv
+.\venv\Scripts\activate
+3. Instalar as Dependências
+
+Com o ambiente virtual ativado, instale todas as bibliotecas necessárias com um único comando:
+
+
+pip install -r requirements.txt
+4. Configurar as Variáveis de Ambiente
+
+Este é o passo mais importante. As chaves de API e outras configurações sensíveis são gerenciadas através de um arquivo .env.
+
+a. Crie um arquivo chamado .env na raiz do projeto.
+
+b. Copie o conteúdo abaixo para dentro do seu arquivo .env e preencha com suas próprias chaves e configurações:
+
+# Arquivo: .env
+# Preencha com suas próprias chaves e configurações
+
+# Configuração da Aplicação Flask
+FLASK_ENV=development
+SECRET_KEY='coloque-aqui-uma-chave-secreta-bem-longa-e-aleatoria'
+
+# Conexão com o Banco de Dados MongoDB
+MONGO_URI='sua-string-de-conexao-do-mongodb-aqui'
+
+# Conexão com o Broker de Mensagens para Celery
+REDIS_URL='redis://localhost:6379/0'
+
+# Chave da API do Google Gemini
+GOOGLE_API_KEY='sua-chave-da-api-do-google-aqui'
+
+🚨 IMPORTANTE: O arquivo .env contém informações sensíveis. Ele já está incluído no .gitignore e NUNCA deve ser enviado para o repositório no GitHub.
+
+▶️ Executando a Aplicação
+
+Para rodar o projeto, você precisará de dois terminais abertos, ambos com o ambiente virtual ativado.
+
+1. Iniciar o Servidor Flask
+
+No primeiro terminal, inicie a aplicação web:
+
+
+python run.py
+
+O servidor estará disponível em http://127.0.0.1:5000. Você pode testar se ele está funcionando acessando http://127.0.0.1:5000/health no seu navegador.
+
+2. Iniciar o Worker do Celery
+
+As tarefas de IA são processadas em segundo plano. Para isso, precisamos de um "worker" do Celery escutando por novas tarefas.
+
+No segundo terminal, execute o seguinte comando:
+
+
+# NOTA: Este comando será finalizado quando a estrutura do Celery for implementada
+celery -A sua_instancia_celery_aqui worker --loglevel=info
+
+(Nota: O comando exato do Celery será definido quando a Seção 4 for implementada, mas a estrutura será essa.)
+
+📂 Estrutura do Projeto
+/projeto-agente-ia/
+├── .env                  # Armazena as variáveis de ambiente (secreto)
+├── requirements.txt      # Lista de dependências Python
+├── run.py                # Ponto de entrada para iniciar a aplicação
+└── /src/
+    ├── __init__.py         # Application Factory (cria a app Flask)
+    ├── config.py           # Carrega as configurações do .env
+    ├── /api/               # Módulos de endpoints (Blueprints)
+    ├── /db/                # Lógica de conexão com o banco de dados
+    └── /tasks/             # Tarefas assíncronas para o Celery (IA, etc.)
