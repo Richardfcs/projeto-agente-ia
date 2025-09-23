@@ -13,12 +13,18 @@ def init_db(app):
     global mongo_client, db, fs
     
     mongo_client = MongoClient(app.config['MONGO_URI'])
-    db = mongo_client.get_default_database() # O nome do DB vem da URI
+    
+    # MUDANÇA AQUI: Em vez de adivinhar, pegamos o nome do DB explicitamente
+    db_name = app.config['MONGO_DB_NAME']
+    if not db_name:
+        raise ValueError("A variável de ambiente MONGO_DB_NAME não foi definida.")
+        
+    db = mongo_client[db_name] # Acessa o banco de dados pelo nome
     fs = GridFS(db)
     
     try:
         mongo_client.admin.command('ping')
-        print("Conexão com MongoDB estabelecida com sucesso!")
+        print(f"Conexão com MongoDB (DB: {db_name}) estabelecida com sucesso!")
     except Exception as e:
         print(f"Erro ao conectar com o MongoDB: {e}")
 
