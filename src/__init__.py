@@ -26,9 +26,11 @@ def create_app():
     # Registra os Blueprints
     from src.api.chat.routes import chat_bp
     from src.api.auth.routes import auth_bp
+    from src.api.files.routes import files_bp
     
     app.register_blueprint(chat_bp, url_prefix='/api/chat')
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(files_bp, url_prefix='/api')
     
     # Adiciona uma rota de "health check" para verificar se o servidor está online
     @app.route('/health')
