@@ -114,3 +114,93 @@ celery -A sua_instancia_celery_aqui worker --loglevel=info
     ├── /db/                # Lógica de conexão com o banco de dados
     └── /tasks/             # Tarefas assíncronas para o Celery (IA, etc.)
 ```
+
+# Projeto Agente de IA - Checklist de Desenvolvimento (Backend)
+
+Este documento rastreia o progresso do desenvolvimento do backend. Marque as caixas conforme as tarefas forem concluídas.
+
+---
+
+### Seção 1: Fundação do Projeto (Setup Inicial)
+
+**Objetivo:** Criar um esqueleto de aplicação Flask funcional, organizado e pronto para escalar.
+
+- [x] **1.1. Estrutura de Pastas:** Estrutura base com `src`, `api`, `db`, `tasks` está criada.
+- [x] **1.2. Gerenciamento de Dependências:** Arquivo `requirements.txt` está completo e todas as dependências foram instaladas.
+- [x] **1.3. Configuração de Ambiente:** Arquivo `.env` foi criado e o `.gitignore` está configurado para ignorá-lo.
+- [x] **1.4. Application Factory:** A função `create_app` em `src/__init__.py` está montando a aplicação Flask corretamente.
+- [x] **1.5. Conexão com Banco de Dados:** A aplicação conecta-se com sucesso ao MongoDB na inicialização.
+- [x] **1.6. Validação do Setup:** O endpoint `GET /health` está funcionando e retorna uma mensagem de sucesso.
+
+---
+
+### Seção 2: Módulo de Autenticação e Usuários
+
+**Objetivo:** Implementar um sistema seguro de registro e login usando JWT.
+
+- [x] **2.1. Modelo de Dados:** A coleção `users` foi definida implicitamente no código para armazenar `username` e `hashed_password`.
+- [x] **2.2. Funções de Criptografia:** Funções para criar e verificar hashes de senha com `passlib` estão implementadas.
+- [x] **2.3. Endpoint de Registro (`POST /api/auth/register`):**
+    - [x] Recebe `username` e `password`.
+    - [x] Verifica se o usuário já existe.
+    - [x] Salva o novo usuário com a senha criptografada.
+    - [x] Retorna status `201 Created` em caso de sucesso.
+- [x] **2.4. Endpoint de Login (`POST /api/auth/login`):**
+    - [x] Recebe `username` e `password`.
+    - [x] Valida as credenciais contra os dados no banco.
+    - [x] Gera e retorna um `access_token` JWT em caso de sucesso.
+    - [x] Retorna status `401 Unauthorized` em caso de falha.
+- [x] **2.5. Endpoint de Perfil (`GET /api/auth/profile`):**
+    - [x] A rota está protegida e requer um token JWT válido.
+    - [x] Extrai a identidade do usuário a partir do token.
+    - [x] Retorna os dados do usuário logado (sem a senha).
+
+---
+
+### Seção 3: Gerenciamento de Arquivos com GridFS
+
+**Objetivo:** Criar endpoints para upload e download de arquivos grandes.
+
+- [ ] **3.1. Modelos de Dados:** Definir as estruturas das coleções `templates` e `documents` no MongoDB.
+- [ ] **3.2. Endpoint de Upload de Template (`POST /api/templates/upload`):**
+    - [ ] Rota protegida (apenas para usuários autorizados/admins).
+    - [ ] Recebe um arquivo (ex: `.docx`, `.xlsx`).
+    - [ ] Salva o arquivo no GridFS.
+    - [ ] Cria um documento de metadados na coleção `templates` referenciando o `file_id` do GridFS.
+- [ ] **3.3. Endpoint de Upload de Documento (`POST /api/documents/upload`):**
+    - [ ] Rota protegida para usuários logados.
+    - [ ] Associa o documento ao `user_id` do usuário atual.
+    - [ ] Salva o arquivo no GridFS.
+    - [ ] Cria um documento de metadados na coleção `documents`.
+- [ ] **3.4. Endpoint de Download (`GET /api/files/<gridfs_file_id>`):**
+    - [ ] Rota protegida.
+    - [ ] Verifica se o usuário logado tem permissão para acessar o arquivo.
+    - [ ] Busca o arquivo no GridFS pelo seu ID.
+    - [ ] Retorna o arquivo para download (streaming).
+
+---
+
+### Seção 4: Módulo Conversacional e Processamento de IA
+
+**Objetivo:** Implementar o fluxo de chat e o processamento assíncrono das solicitações de IA.
+
+- [ ] **4.1. Modelos de Dados:** Definir as estruturas das coleções `conversations` e `messages`.
+- [ ] **4.2. Configuração do Celery:**
+    - [ ] Integrar o Celery com a aplicação Flask.
+    - [ ] Definir a tarefa assíncrona (`@celery.task`) para o processamento de IA.
+- [ ] **4.3. Endpoint de Nova Mensagem (`POST /api/chat/messages`):**
+    - [ ] Rota protegida.
+    - [ ] Cria/atualiza o documento na coleção `conversations`.
+    - [ ] Cria a mensagem do usuário na coleção `messages`.
+    - [ ] Dispara a tarefa assíncrona no Celery, passando os IDs necessários.
+    - [ ] Retorna uma resposta imediata com status `202 Accepted`.
+- [ ] **4.4. Endpoints de Histórico:**
+    - [ ] `GET /api/chat/conversations`: Lista todas as conversas do usuário logado.
+    - [ ] `GET /api/chat/conversations/<conversation_id>`: Lista todas as mensagens de uma conversa específica.
+- [ ] **4.5. Lógica do Worker de IA (Tarefa Celery):**
+    - [ ] Busca o histórico da conversa e os arquivos necessários do MongoDB/GridFS.
+    - [ ] Interage com a API do Gemini.
+    - [ ] Usa as funções de `ia_processor` para criar os arquivos de saída em memória (streams).
+    - [ ] Salva os arquivos de saída no GridFS.
+    - [ ] Cria a mensagem de resposta do assistente na coleção `messages`.
+    - [ ] Atualiza o status da conversa e da mensagem para "completed".
