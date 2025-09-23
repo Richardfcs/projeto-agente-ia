@@ -1,5 +1,10 @@
 # Arquivo: run.py
 
+from dotenv import load_dotenv
+
+# Carrega as variáveis do arquivo .env
+load_dotenv()
+
 from src import create_app
 
 # Cria a instância da aplicação usando a factory

@@ -28,3 +28,6 @@ google-generativeai
 
 # Configuração
 python-dotenv
+
+# Criptografia
+bcrypt

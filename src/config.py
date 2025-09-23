@@ -1,10 +1,6 @@
 # Arquivo: src/config.py
 
 import os
-from dotenv import load_dotenv
-
-# Carrega as variáveis do arquivo .env
-load_dotenv()
 
 class Config:
     """Classe de configuração que busca as variáveis de ambiente."""
