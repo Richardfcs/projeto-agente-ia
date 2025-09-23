@@ -23,25 +23,30 @@ Abra seu terminal e clone o projeto:
 ```bash
 git clone https://sua-url-do-repositorio.git
 cd projeto-agente-ia
+```
 2. Criar e Ativar o Ambiente Virtual
 
 É uma boa prática isolar as dependências do projeto em um ambiente virtual.
 
 Para macOS / Linux:
-
+```bash
 python3 -m venv venv
 source venv/bin/activate
-
+```
 Para Windows:
-
+```bash
 python -m venv venv
 .\venv\Scripts\activate
+```
+
 3. Instalar as Dependências
 
 Com o ambiente virtual ativado, instale todas as bibliotecas necessárias com um único comando:
 
-
+```bash
 pip install -r requirements.txt
+```
+
 4. Configurar as Variáveis de Ambiente
 
 Este é o passo mais importante. As chaves de API e outras configurações sensíveis são gerenciadas através de um arquivo .env.
@@ -52,7 +57,7 @@ b. Copie o conteúdo abaixo para dentro do seu arquivo .env e preencha com suas 
 
 # Arquivo: .env
 # Preencha com suas próprias chaves e configurações
-
+```python
 # Configuração da Aplicação Flask
 FLASK_ENV=development
 SECRET_KEY='coloque-aqui-uma-chave-secreta-bem-longa-e-aleatoria'
@@ -65,6 +70,7 @@ REDIS_URL='redis://localhost:6379/0'
 
 # Chave da API do Google Gemini
 GOOGLE_API_KEY='sua-chave-da-api-do-google-aqui'
+```
 
 🚨 IMPORTANTE: O arquivo .env contém informações sensíveis. Ele já está incluído no .gitignore e NUNCA deve ser enviado para o repositório no GitHub.
 
@@ -76,8 +82,9 @@ Para rodar o projeto, você precisará de dois terminais abertos, ambos com o am
 
 No primeiro terminal, inicie a aplicação web:
 
-
+```bash
 python run.py
+```
 
 O servidor estará disponível em http://127.0.0.1:5000. Você pode testar se ele está funcionando acessando http://127.0.0.1:5000/health no seu navegador.
 
@@ -87,12 +94,14 @@ As tarefas de IA são processadas em segundo plano. Para isso, precisamos de um 
 
 No segundo terminal, execute o seguinte comando:
 
-
 # NOTA: Este comando será finalizado quando a estrutura do Celery for implementada
+```bash
 celery -A sua_instancia_celery_aqui worker --loglevel=info
+```
 
 (Nota: O comando exato do Celery será definido quando a Seção 4 for implementada, mas a estrutura será essa.)
 
+```
 📂 Estrutura do Projeto
 /projeto-agente-ia/
 ├── .env                  # Armazena as variáveis de ambiente (secreto)
@@ -104,3 +113,4 @@ celery -A sua_instancia_celery_aqui worker --loglevel=info
     ├── /api/               # Módulos de endpoints (Blueprints)
     ├── /db/                # Lógica de conexão com o banco de dados
     └── /tasks/             # Tarefas assíncronas para o Celery (IA, etc.)
+```
