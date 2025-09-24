@@ -183,71 +183,66 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 - [x] **4.3. Orquestração da Crew (`ia_processor.py`):**
     - [x] A função `processar_solicitacao_ia` foi refatorada para montar e executar uma `Crew`.
     - [x] As tarefas (`Task`) para análise e execução estão definidas.
-- [ ] **4.4. Validação do Fluxo de Decisão:**
-    - [ ] Testar se o `agente_roteador` consegue interpretar um prompt e delegar a tarefa correta.
-    - [ ] Testar se o `agente_executor` consegue usar a `FileReaderTool` com sucesso.
-    - [ ] Testar se o `agente_executor` consegue usar a `TemplateFillerTool` com sucesso.
-- [ ] **4.5. Processamento do Resultado Final:**
-    - [ ] A resposta final da `Crew` é corretamente interpretada.
-    - [ ] A mensagem do assistente e os links para os documentos gerados são salvos corretamente no MongoDB.
+- [x] **4.4. Validação do Fluxo de Decisão:**
+    - [x] Testar se o `agente_roteador` consegue interpretar um prompt e delegar a tarefa correta.
+    - [x] Testar se o `agente_executor` consegue usar a `FileReaderTool` com sucesso.
+    - [x] Testar se o `agente_executor` consegue usar a `TemplateFillerTool` com sucesso.
+- [x] **4.5. Processamento do Resultado Final:**
+    - [x] A resposta final da `Crew` é corretamente interpretada.
+    - [x] A mensagem do assistente e os links para os documentos gerados são salvos corretamente no MongoDB.
     
 ---
 
-### **Próximos Passos Funcionais para o Backend**
+### **Próximos Passos para o Desenvolvimento do Backend**
 
-#### **Prioridade 1: Dar "Memória" à IA**
+#### **🎯 Foco Imediato: Tornar a IA Mais Inteligente e Flexível**
 
-**Objetivo:** Fazer com que a IA entenda o contexto da conversa, permitindo interações de acompanhamento.
+**Objetivo:** Aumentar drasticamente a capacidade da IA de entender e executar uma gama maior de tarefas relacionadas a documentos.
 
--   **[ ] 1.1. Modificar a Tarefa de IA (`processar_solicitacao_ia`):**
-    -   Antes de chamar a API do Gemini, a função deve buscar **todas as mensagens anteriores** da `conversation_id` atual no MongoDB.
-    -   Formatar o histórico de mensagens em um formato que o Gemini entenda (geralmente uma lista de objetos com `role` e `content`).
-    -   Enviar o histórico completo junto com o novo prompt do usuário para a API do Gemini.
+*   **[ ] 1. Implementar um "Agente Conversador" para Respostas Diretas:**
+    *   **Tarefa:** Criar um novo agente, `agente_conversador`, que não possui ferramentas.
+    *   **Lógica:** Modificar o `agente_roteador` para que ele possa delegar a tarefa a este novo agente se a intenção do usuário for apenas uma pergunta geral. Isso evita que a Crew tente usar ferramentas desnecessariamente.
 
----
+*   **[ ] 2. Criar Ferramenta de Geração de Documentos Simples:**
+    *   **Tarefa:** Desenvolver uma nova `SimpleDocumentGeneratorTool` em `tools.py`.
+    *   **Parâmetros:** `content` (o texto a ser inserido) e `file_format` ("docx", "pdf", etc.).
+    *   **Ação:** A ferramenta chamará a função `criar_docx_stream` ou `criar_pdf_stream` correspondente.
+    *   **Integração:** Adicionar esta ferramenta ao `agente_executor_de_arquivos` e ensinar o `agente_roteador` a usá-la.
 
-#### **Prioridade 2: Ativar a Interação com Arquivos**
+*   **[ ] 3. Habilitar a Extração de Contexto de Arquivos Anexados:**
+    *   **Tarefa:** Refinar a `backstory` e a `goal` do `agente_roteador`.
+    *   **Lógica:** Instruí-lo a, quando o usuário pedir para preencher um template e anexar um arquivo, primeiro usar a `FileReaderTool` para extrair o conteúdo do anexo e, em seguida, usar esse conteúdo para construir o dicionário de `context` para a `TemplateFillerTool`. Isso pode exigir um passo intermediário ou um agente adicional.
 
-**Objetivo:** Permitir que a IA leia o conteúdo dos arquivos que os usuários enviam e use os templates para gerar documentos formatados.
+#### **🎯 Foco a Médio Prazo: Melhorar a Gestão de Arquivos e a Usabilidade**
 
--   **[ ] 2.1. Criar "Ferramentas" de Leitura de Arquivos:**
-    -   Desenvolver uma função (`read_docx_from_gridfs`) que, dado um `file_id`, busca o arquivo `.docx` no GridFS e extrai seu texto.
-    -   Desenvolver uma função (`read_xlsx_from_gridfs`) que usa a biblioteca `pandas` para ler um arquivo `.xlsx` do GridFS e convertê-lo em um formato útil para a IA (como JSON ou Markdown).
+**Objetivo:** Dar ao usuário mais controle sobre seus dados e tornar o sistema mais intuitivo.
 
--   **[ ] 2.2. Habilitar o Uso de Templates (com `docxtpl`):**
-    -   Modificar a tarefa de IA para que, se o prompt do usuário mencionar um template, ela:
-        1.  Busque o arquivo do template (`.docx` com campos `{{ variavel }}`) do GridFS.
-        2.  Use a resposta do Gemini para criar um dicionário de "contexto" (ex: `{"nome_cliente": "Empresa X", ...}`).
-        3.  Use a biblioteca `docxtpl` para renderizar o template com o contexto, gerando o documento final preenchido.
+*   **[ ] 4. Implementar Nomeação de Arquivos Inteligente:**
+    *   **Tarefa:** Adicionar um novo parâmetro `output_filename` à `TemplateFillerTool` e à `SimpleDocumentGeneratorTool`.
+    *   **Lógica:** Ensinar o `agente_roteador` a extrair um nome de arquivo apropriado do prompt do usuário ou a criar um com base no contexto (ex: "proposta_cliente_x.docx"). Se nenhum nome for sugerido, um nome padrão será usado.
 
--   **[ ] 2.3. Atualizar a Rota de Mensagens:**
-    -   Modificar o endpoint `POST /api/chat/conversations` para que ele possa receber, opcionalmente, um `input_document_id` junto com o prompt.
-    -   Salvar este ID na mensagem do usuário na coleção `messages` para que a tarefa de IA saiba qual arquivo ler.
+*   **[ ] 5. Desenvolver Endpoints para Gerenciamento de Dados:**
+    *   **Tarefa:** Criar novas rotas na API para funcionalidades de CRUD (Criar, Ler, Atualizar, Deletar).
+        *   `GET /api/documents`: Listar todos os metadados dos documentos do usuário logado.
+        *   `DELETE /api/documents/<document_id>`: Excluir um documento (e seu arquivo correspondente no GridFS).
+        *   `DELETE /api/chat/messages/<message_id>`: Excluir uma mensagem específica de uma conversa.
+        *   `DELETE /api/chat/conversations/<conversation_id>`: Excluir uma conversa inteira e todas as suas mensagens.
 
----
-
-#### **Prioridade 3: Aumentar a Flexibilidade e o Controle do Usuário**
-
-**Objetivo:** Dar ao usuário mais controle sobre o resultado gerado.
-
--   **[ ] 3.1. Geração de Arquivos Dinâmica:**
-    -   Modificar a tarefa de IA para que ela analise o prompt do usuário em busca de palavras-chave como "crie um PDF", "gere uma planilha" ou "faça um documento Word".
-    -   Com base nessa análise, a tarefa deve chamar a função de criação de stream correta (`criar_pdf_stream`, `criar_xlsx_stream`, etc.).
-
--   **[ ] 3.2. Nomeação de Arquivos Inteligente:**
-    -   Implementar uma lógica (possivelmente usando a própria IA) para gerar um nome de arquivo relevante com base no conteúdo do prompt (ex: `relatorio_vendas_q3.pdf`), em vez de usar sempre "relatorio_gerado.docx".
+*   **[ ] 6. (Opcional) Adicionar Suporte a Anexos Múltiplos:**
+    *   **Tarefa:** Modificar a rota `POST /conversations` para aceitar uma lista de `input_document_ids` em vez de um único ID.
+    *   **Lógica:** Adaptar a lógica de enriquecimento de prompt no `ia_processor.py` para ler e concatenar o conteúdo de múltiplos arquivos.
 
 ---
 
-#### **Prioridade 4: Robustez e Qualidade de Vida**
+#### **🔭 Foco a Longo Prazo: Robustez e Polimento**
 
-**Objetivo:** Tornar o sistema mais robusto e fácil de gerenciar.
+**Objetivo:** Preparar a aplicação para um ambiente mais crítico, focando em confiabilidade e experiência do usuário.
 
--   **[ ] 4.1. Tratamento de Erros Específico:**
-    -   Dentro da tarefa de IA, adicionar blocos `try...except` específicos para falhas comuns (ex: API do Gemini indisponível, arquivo em formato inválido, template mal formatado).
-    -   Retornar mensagens de erro claras e úteis para o usuário no chat.
+*   **[ ] 7. Implementar Tratamento de Erros Guiado por IA:**
+    *   **Tarefa:** Criar um "Agente de Análise de Erros".
+    *   **Lógica:** Dentro do bloco `except` principal do `processar_solicitacao_ia`, em vez de apenas registrar um erro genérico, passar a mensagem de erro técnica para este novo agente.
+    *   **Goal do Agente:** A meta do agente será traduzir o erro técnico (ex: "Template 'x' not found") em uma sugestão amigável e útil para o usuário (ex: "Não encontrei esse template. Você quis dizer 'y'? Os templates disponíveis são...").
 
--   **[ ] 4.2. Roles de Usuário (Admin vs. Usuário Comum):**
-    -   Adicionar um campo `role` (ex: "admin", "user") na coleção `users`.
-    -   Modificar o endpoint de upload de templates (`POST /api/templates/upload`) para que apenas usuários com a role "admin" possam acessá-lo.
-    -   Criar endpoints de administração para gerenciar usuários e templates.
+*   **[ ] 8. Reintroduzir o Processamento Assíncrono (Celery + Redis):**
+    *   **Tarefa:** Reverter as simplificações que fizemos. Reintroduzir o Celery, configurar o Redis e transformar a chamada `processar_solicitacao_ia` de volta em uma chamada `.delay()`.
+    *   **Frontend:** Será necessário implementar um mecanismo de *polling* ou *WebSockets* para que a interface saiba quando a tarefa foi concluída.
