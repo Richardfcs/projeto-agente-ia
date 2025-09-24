@@ -18,10 +18,26 @@ if not Config.GOOGLE_API_KEY:
 genai.configure(api_key=Config.GOOGLE_API_KEY)
 
 
-def gerar_resposta(prompt: str) -> str:
-    """Interage com o Gemini e retorna a resposta em texto."""
-    modelo = genai.GenerativeModel("gemini-1.5-flash")
-    resposta = modelo.generate_content(prompt)
+def gerar_resposta(historico_mensagens: list) -> str:
+    """
+    Interage com o Gemini usando um histórico de conversa completo e retorna a nova resposta.
+    """
+    modelo = genai.GenerativeModel("gemini-2.5-flash-lite")
+    
+    # O Gemini espera um formato específico para o histórico.
+    # O papel do assistente é 'model'. O papel do usuário é 'user'.
+    mensagens_para_api = []
+    for msg in historico_mensagens:
+        role = "model" if msg["role"] == "assistant" else "user"
+        mensagens_para_api.append({"role": role, "parts": [msg["content"]]})
+
+    # Inicia o chat com o histórico
+    chat = modelo.start_chat(history=mensagens_para_api[:-1]) # Envia todo o histórico, exceto a última mensagem
+    
+    # Envia a última mensagem do usuário para obter a nova resposta
+    ultima_mensagem = mensagens_para_api[-1]["parts"]
+    resposta = chat.send_message(ultima_mensagem)
+    
     return resposta.text
 
 def extrair_topicos(texto: str) -> list:
@@ -70,61 +86,69 @@ def criar_pdf_stream(topicos: list) -> io.BytesIO:
 # Esta não é mais uma tarefa do Celery, é uma função Python padrão.
 def processar_solicitacao_ia(message_id: str) -> str:
     """
-    Executa o fluxo completo de processamento de IA para uma dada mensagem.
-    Retorna "Sucesso" ou "Falha".
+    Executa o fluxo completo de processamento de IA, agora com memória de conversa.
     """
-    print(f"Iniciando processamento para a mensagem: {message_id}")
+    print(f"Iniciando processamento com memória para a mensagem: {message_id}")
     db = get_db()
     fs = get_gridfs()
     
     try:
-        message = db.messages.find_one({"_id": ObjectId(message_id)})
-        if not message:
+        # 1. Buscar a mensagem atual para obter o ID da conversa
+        mensagem_atual = db.messages.find_one({"_id": ObjectId(message_id)})
+        if not mensagem_atual:
             print(f"ERRO: Mensagem com ID {message_id} não encontrada.")
             return "Falha"
 
-        prompt = message.get("content")
+        conversation_id = mensagem_atual.get("conversation_id")
 
-        # 1. Chamar a IA para gerar a resposta
-        resposta_bruta = gerar_resposta(prompt)
+        # 2. Buscar TODO o histórico de mensagens da conversa, em ordem
+        historico_cursor = db.messages.find(
+            {"conversation_id": conversation_id}
+        ).sort("timestamp", 1)
+        
+        # Converte o cursor em uma lista de dicionários
+        historico_completo = list(historico_cursor)
+        
+        # 3. Chamar a IA com o histórico completo
+        resposta_bruta = gerar_resposta(historico_completo)
         topicos = extrair_topicos(resposta_bruta)
         
-        # 2. Criar o arquivo em memória (exemplo com DOCX)
-        # TODO: Adicionar lógica para escolher o formato com base no prompt do usuário
-        nome_arquivo = "relatorio_gerado.docx"
+        # O resto do fluxo permanece o mesmo...
+        # 4. Criar o arquivo em memória
+        nome_arquivo = "relatorio_gerado_com_contexto.docx"
         arquivo_stream = criar_docx_stream(topicos)
         
-        # 3. Salvar o arquivo de saída no GridFS
+        # 5. Salvar o arquivo no GridFS
         output_file_id = fs.put(arquivo_stream, filename=nome_arquivo)
-        print(f"Arquivo salvo no GridFS com ID: {output_file_id}")
+        print(f"Arquivo com contexto salvo no GridFS com ID: {output_file_id}")
         
-        # 4. Criar o metadado do arquivo de saída na coleção 'documents'
+        # 6. Criar o metadado do arquivo
         output_doc_meta = {
             "filename": nome_arquivo,
             "gridfs_file_id": output_file_id,
-            "owner_id": message.get("user_id"),
+            "owner_id": mensagem_atual.get("user_id"),
             "created_at": datetime.utcnow()
         }
         output_doc = db.documents.insert_one(output_doc_meta)
         
-        # 5. Criar a mensagem de resposta do assistente no chat
+        # 7. Criar a mensagem de resposta do assistente
         assistant_message = {
-            "conversation_id": message.get("conversation_id"),
+            "conversation_id": conversation_id,
             "role": "assistant",
-            "content": f"Seu documento '{nome_arquivo}' foi gerado com sucesso.",
+            "content": f"Com base em nossa conversa, gerei o documento '{nome_arquivo}'.",
             "generated_document_id": output_doc.inserted_id,
-            "user_id": message.get("user_id"),
+            "user_id": mensagem_atual.get("user_id"),
             "timestamp": datetime.utcnow()
         }
         db.messages.insert_one(assistant_message)
         
-        # 6. Atualizar a conversa para que ela apareça no topo do histórico
+        # 8. Atualizar a conversa
         db.conversations.update_one(
-            {"_id": message.get("conversation_id")},
+            {"_id": conversation_id},
             {"$set": {"last_updated_at": datetime.utcnow()}}
         )
 
-        print(f"Processamento para a mensagem {message_id} concluído com sucesso.")
+        print(f"Processamento com memória para a mensagem {message_id} concluído.")
         return "Sucesso"
 
     except Exception as e:
