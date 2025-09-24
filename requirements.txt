@@ -1,5 +1,9 @@
 # Arquivo: requirements.txt
 
+# Framewors IA
+crewai
+crewai_tools
+
 # Framework Web
 Flask
 Flask-Cors

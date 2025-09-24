@@ -13,17 +13,25 @@ chat_bp = Blueprint('chat_bp', __name__)
 @chat_bp.route('/conversations', methods=['POST'])
 @jwt_required()
 def send_message():
-    """Inicia uma nova conversa ou envia uma mensagem e aguarda o processamento."""
+    """
+    Inicia uma nova conversa ou envia uma mensagem para uma existente.
+    Agora com a capacidade de anexar um documento de entrada.
+    """
     current_user_id = get_jwt_identity()
     data = request.get_json()
+
+    # Pega os dados do corpo da requisição
     prompt = data.get('prompt')
-    conversation_id_str = data.get('conversation_id')
+    conversation_id_str = data.get('conversation_id') # Opcional
+    input_document_id_str = data.get('input_document_id') # Opcional
 
     if not prompt:
         return jsonify({"erro": "O campo 'prompt' é obrigatório"}), 400
 
     db = get_db()
     
+    # Se não houver um ID de conversa, cria uma nova.
+    # Se houver, valida o ID e o utiliza.
     if not conversation_id_str:
         new_conv = {
             "user_id": ObjectId(current_user_id),
@@ -36,9 +44,17 @@ def send_message():
     else:
         try:
             conversation_id = ObjectId(conversation_id_str)
+            # Verificação de segurança: garante que a conversa pertence ao usuário logado
+            conv_check = db.conversations.find_one({
+                "_id": conversation_id, 
+                "user_id": ObjectId(current_user_id)
+            })
+            if not conv_check:
+                return jsonify({"erro": "Conversa não encontrada ou acesso negado"}), 404
         except InvalidId:
             return jsonify({"erro": "ID de conversa inválido"}), 400
 
+    # Constrói o documento da mensagem do usuário
     user_message = {
         "conversation_id": conversation_id,
         "role": "user",
@@ -46,9 +62,28 @@ def send_message():
         "user_id": ObjectId(current_user_id),
         "timestamp": datetime.utcnow()
     }
+    
+    # Se um documento foi anexado, adiciona sua referência à mensagem
+    if input_document_id_str:
+        try:
+            doc_id = ObjectId(input_document_id_str)
+            # Verificação de segurança: garante que o documento pertence ao usuário logado
+            doc_check = db.documents.find_one({
+                "_id": doc_id,
+                "owner_id": ObjectId(current_user_id)
+            })
+            if not doc_check:
+                return jsonify({"erro": "Documento anexado não encontrado ou acesso negado"}), 404
+            
+            # Adiciona a referência ao documento de metadados na mensagem
+            user_message["input_document_id"] = doc_id
+        except InvalidId:
+            return jsonify({"erro": "ID de documento anexado inválido"}), 400
+
+    # Insere a mensagem final no banco de dados
     msg_result = db.messages.insert_one(user_message)
 
-    # Chama a função de processamento diretamente e aguarda o resultado.
+    # Chama a função de processamento de IA diretamente (fluxo síncrono)
     resultado = processar_solicitacao_ia(str(msg_result.inserted_id))
 
     if resultado == "Sucesso":

@@ -1,0 +1,44 @@
+# Arquivo: /src/tasks/agents.py
+
+from crewai import Agent
+from src.tasks.tools import FileReaderTool, TemplateFillerTool
+
+# Instancia as ferramentas para que os agentes possam usá-las.
+# É importante instanciá-las apenas uma vez e reutilizá-las.
+file_reader_tool = FileReaderTool()
+template_filler_tool = TemplateFillerTool()
+
+# --- DEFINIÇÃO DOS AGENTES DA EQUIPE ---
+
+agente_roteador = Agent(
+    role="Analista e Roteador de Tarefas Sênior",
+    goal=(
+        "Analisar de forma rigorosa o histórico de uma conversa e o último pedido do usuário. "
+        "Sua principal responsabilidade é traduzir esse pedido em uma instrução perfeitamente clara e "
+        "acionável para ser delegada a um agente especialista."
+    ),
+    backstory=(
+        "Você é o cérebro da operação, um mestre em interpretar a intenção humana. "
+        "Você não executa tarefas, você as planeja. Você lê o que o usuário quer e "
+        "cria um plano de ação detalhado. Se o usuário quer ler um arquivo, sua instrução "
+        "deve ser 'Use a ferramenta Leitor de Arquivos...'. Se ele quer usar um template, "
+        "sua instrução deve ser 'Use a ferramenta Preenchedor de Templates...'. "
+        "Sua saída é a entrada para o próximo agente."
+    ),
+    allow_delegation=False, # Este agente planeja, mas não delega através de um sub-agente. A delegação é feita pela estrutura de tarefas da Crew.
+    verbose=True
+)
+
+agente_executor_de_arquivos = Agent(
+    role="Especialista em Documentos e Ferramentas",
+    goal="Executar com precisão as tarefas de manipulação de documentos que lhe são delegadas.",
+    backstory=(
+        "Você é um especialista prático. Você recebe uma instrução clara do Analista e a executa "
+        "usando uma de suas ferramentas. Você não toma decisões, apenas segue o plano. "
+        "Suas ferramentas são para ler arquivos e preencher templates. Sua resposta final "
+        "é sempre o resultado direto da ferramenta que você usou."
+    ),
+    tools=[file_reader_tool, template_filler_tool],
+    allow_delegation=False,
+    verbose=True
+)
