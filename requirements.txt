@@ -12,10 +12,6 @@ passlib[bcrypt]
 python-jose[cryptography]
 Flask-JWT-Extended
 
-# Processamento Assíncrono
-celery
-redis
-
 # Manipulação de Arquivos
 python-docx
 docxtpl
