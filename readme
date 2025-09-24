@@ -126,9 +126,9 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 **Objetivo:** Criar um esqueleto de aplicação Flask funcional, organizado e pronto para escalar.
 
 - [x] **1.1. Estrutura de Pastas:** Estrutura base com `src`, `api`, `db`, `tasks` está criada.
-- [x] **1.2. Gerenciamento de Dependências:** Arquivo `requirements.txt` está completo e todas as dependências foram instaladas.
+- [x] **1.2. Gerenciamento de Dependências:** Arquivo `requirements.txt` foi atualizado para remover Celery/Redis e usar Flask.
 - [x] **1.3. Configuração de Ambiente:** Arquivo `.env` foi criado e o `.gitignore` está configurado para ignorá-lo.
-- [x] **1.4. Application Factory:** A função `create_app` em `src/__init__.py` está montando a aplicação Flask corretamente.
+- [x] **1.4. Application Factory:** A função `create_app` em `src/__init__.py` monta a aplicação Flask corretamente, sem a configuração do Celery.
 - [x] **1.5. Conexão com Banco de Dados:** A aplicação conecta-se com sucesso ao MongoDB na inicialização.
 - [x] **1.6. Validação do Setup:** O endpoint `GET /health` está funcionando e retorna uma mensagem de sucesso.
 
@@ -138,7 +138,7 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 
 **Objetivo:** Implementar um sistema seguro de registro e login usando JWT.
 
-- [x] **2.1. Modelo de Dados:** A coleção `users` foi definida implicitamente no código para armazenar `username` e `hashed_password`.
+- [x] **2.1. Modelo de Dados:** A coleção `users` está sendo utilizada para armazenar `username` e `hashed_password`.
 - [x] **2.2. Funções de Criptografia:** Funções para criar e verificar hashes de senha com `passlib` estão implementadas.
 - [x] **2.3. Endpoint de Registro (`POST /api/auth/register`):**
     - [x] Recebe `username` e `password`.
@@ -149,7 +149,6 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
     - [x] Recebe `username` e `password`.
     - [x] Valida as credenciais contra os dados no banco.
     - [x] Gera e retorna um `access_token` JWT em caso de sucesso.
-    - [x] Retorna status `401 Unauthorized` em caso de falha.
 - [x] **2.5. Endpoint de Perfil (`GET /api/auth/profile`):**
     - [x] A rota está protegida e requer um token JWT válido.
     - [x] Extrai a identidade do usuário a partir do token.
@@ -161,46 +160,35 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 
 **Objetivo:** Criar endpoints para upload e download de arquivos grandes.
 
-- [x] **3.1. Modelos de Dados:** Definir as estruturas das coleções `templates` e `documents` no MongoDB.
-- [x] **3.2. Endpoint de Upload de Template (`POST /api/templates/upload`):**
-    - [x] Rota protegida (apenas para usuários autorizados/admins).
-    - [x] Recebe um arquivo (ex: `.docx`, `.xlsx`).
-    - [x] Salva o arquivo no GridFS.
-    - [x] Cria um documento de metadados na coleção `templates` referenciando o `file_id` do GridFS.
-- [x] **3.3. Endpoint de Upload de Documento (`POST /api/documents/upload`):**
-    - [x] Rota protegida para usuários logados.
-    - [x] Associa o documento ao `user_id` do usuário atual.
-    - [x] Salva o arquivo no GridFS.
-    - [x] Cria um documento de metadados na coleção `documents`.
+- [x] **3.1. Modelos de Dados:** As coleções `templates` e `documents` são utilizadas para armazenar os metadados dos arquivos.
+- [x] **3.2. Endpoint de Upload de Template (`POST /api/templates/upload`):** Rota implementada e funcional.
+- [x] **3.3. Endpoint de Upload de Documento (`POST /api/documents/upload`):** Rota implementada e funcional.
 - [x] **3.4. Endpoint de Download (`GET /api/files/<gridfs_file_id>`):**
-    - [x] Rota protegida.
-    - [x] Verifica se o usuário logado tem permissão para acessar o arquivo.
-    - [x] Busca o arquivo no GridFS pelo seu ID.
-    - [x] Retorna o arquivo para download (streaming).
+    - [x] A rota está protegida.
+    - [x] Verifica a permissão do usuário para acessar o arquivo.
+    - [x] Busca o arquivo no GridFS e o retorna para download.
 
 ---
 
-### Seção 4: Módulo Conversacional e Processamento de IA
+### Seção 4: Módulo Conversacional e Processamento de IA (Síncrono)
 
-**Objetivo:** Implementar o fluxo de chat e o processamento assíncrono das solicitações de IA.
+**Objetivo:** Implementar o fluxo de chat onde a API aguarda a conclusão do processamento de IA.
 
-- [ ] **4.1. Modelos de Dados:** Definir as estruturas das coleções `conversations` e `messages`.
-- [ ] **4.2. Configuração do Celery:**
-    - [ ] Integrar o Celery com a aplicação Flask.
-    - [ ] Definir a tarefa assíncrona (`@celery.task`) para o processamento de IA.
-- [ ] **4.3. Endpoint de Nova Mensagem (`POST /api/chat/messages`):**
-    - [ ] Rota protegida.
-    - [ ] Cria/atualiza o documento na coleção `conversations`.
-    - [ ] Cria a mensagem do usuário na coleção `messages`.
-    - [ ] Dispara a tarefa assíncrona no Celery, passando os IDs necessários.
-    - [ ] Retorna uma resposta imediata com status `202 Accepted`.
-- [ ] **4.4. Endpoints de Histórico:**
-    - [ ] `GET /api/chat/conversations`: Lista todas as conversas do usuário logado.
-    - [ ] `GET /api/chat/conversations/<conversation_id>`: Lista todas as mensagens de uma conversa específica.
-- [ ] **4.5. Lógica do Worker de IA (Tarefa Celery):**
-    - [ ] Busca o histórico da conversa e os arquivos necessários do MongoDB/GridFS.
-    - [ ] Interage com a API do Gemini.
-    - [ ] Usa as funções de `ia_processor` para criar os arquivos de saída em memória (streams).
-    - [ ] Salva os arquivos de saída no GridFS.
-    - [ ] Cria a mensagem de resposta do assistente na coleção `messages`.
-    - [ ] Atualiza o status da conversa e da mensagem para "completed".
+- [x] **4.1. Modelos de Dados:** As estruturas das coleções `conversations` e `messages` estão definidas e sendo utilizadas.
+- [x] **4.2. Endpoint de Nova Mensagem (`POST /api/chat/conversations`):**
+    - [x] A rota está protegida e funcional.
+    - [x] Cria/atualiza os documentos nas coleções `conversations` e `messages`.
+    - [x] **Chama a função de processamento de IA (`processar_solicitacao_ia`) diretamente.**
+    - [x] **Aguarda a conclusão da tarefa de IA antes de responder.**
+    - [x] Retorna uma resposta (`201 Created` ou `500 Server Error`) após o processamento.
+- [x] **4.3. Endpoints de Histórico:**
+    - [x] `GET /api/chat/conversations`: Lista todas as conversas do usuário logado.
+    - [x] `GET /api/chat/conversations/<conversation_id>`: Lista todas as mensagens de uma conversa específica.
+- [x] **4.4. Função de Processamento de IA (`processar_solicitacao_ia`):**
+    - [x] É uma função Python padrão (não mais uma tarefa Celery).
+    - [x] Busca o histórico e os arquivos necessários do MongoDB/GridFS.
+    - [x] Interage com a API do Gemini.
+    - [x] Cria os arquivos de saída em memória (streams).
+    - [x] Salva os arquivos de saída no GridFS e cria seus metadados.
+    - [x] Cria a mensagem de resposta do assistente na coleção `messages`.
+    - [x] Retorna um status de sucesso ou falha para a rota da API.
