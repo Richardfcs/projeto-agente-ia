@@ -170,28 +170,26 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 
 ---
 
-### Seção 4: Módulo Conversacional e Processamento de IA (Síncrono)
+### Seção 4: Módulo Conversacional com Arquitetura CrewAI
 
-**Objetivo:** Implementar o fluxo de chat onde a API aguarda a conclusão do processamento de IA.
+**Objetivo:** Orquestrar uma equipe de agentes de IA para processar solicitações de forma modular e robusta.
 
-- [x] **4.1. Modelos de Dados:** As estruturas das coleções `conversations` e `messages` estão definidas e sendo utilizadas.
-- [x] **4.2. Endpoint de Nova Mensagem (`POST /api/chat/conversations`):**
-    - [x] A rota está protegida e funcional.
-    - [x] Cria/atualiza os documentos nas coleções `conversations` e `messages`.
-    - [x] **Chama a função de processamento de IA (`processar_solicitacao_ia`) diretamente.**
-    - [x] **Aguarda a conclusão da tarefa de IA antes de responder.**
-    - [x] Retorna uma resposta (`201 Created` ou `500 Server Error`) após o processamento.
-- [x] **4.3. Endpoints de Histórico:**
-    - [x] `GET /api/chat/conversations`: Lista todas as conversas do usuário logado.
-    - [x] `GET /api/chat/conversations/<conversation_id>`: Lista todas as mensagens de uma conversa específica.
-- [x] **4.4. Função de Processamento de IA (`processar_solicitacao_ia`):**
-    - [x] É uma função Python padrão (não mais uma tarefa Celery).
-    - [x] Busca o histórico e os arquivos necessários do MongoDB/GridFS.
-    - [x] Interage com a API do Gemini.
-    - [x] Cria os arquivos de saída em memória (streams).
-    - [x] Salva os arquivos de saída no GridFS e cria seus metadados.
-    - [x] Cria a mensagem de resposta do assistente na coleção `messages`.
-    - [x] Retorna um status de sucesso ou falha para a rota da API.
+- [x] **4.1. Definição das Ferramentas (`tools.py`):**
+    - [x] Ferramenta `FileReaderTool` para ler arquivos do GridFS está criada.
+    - [x] Ferramenta `TemplateFillerTool` para preencher templates está criada.
+- [x] **4.2. Definição dos Agentes (`agents.py`):**
+    - [x] `agente_roteador` (analista/planejador) está definido.
+    - [x] `agente_executor_de_arquivos` (especialista em ferramentas) está definido.
+- [x] **4.3. Orquestração da Crew (`ia_processor.py`):**
+    - [x] A função `processar_solicitacao_ia` foi refatorada para montar e executar uma `Crew`.
+    - [x] As tarefas (`Task`) para análise e execução estão definidas.
+- [ ] **4.4. Validação do Fluxo de Decisão:**
+    - [ ] Testar se o `agente_roteador` consegue interpretar um prompt e delegar a tarefa correta.
+    - [ ] Testar se o `agente_executor` consegue usar a `FileReaderTool` com sucesso.
+    - [ ] Testar se o `agente_executor` consegue usar a `TemplateFillerTool` com sucesso.
+- [ ] **4.5. Processamento do Resultado Final:**
+    - [ ] A resposta final da `Crew` é corretamente interpretada.
+    - [ ] A mensagem do assistente e os links para os documentos gerados são salvos corretamente no MongoDB.
     
 ---
 

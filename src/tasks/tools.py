@@ -44,11 +44,19 @@ class FileReaderTool(BaseTool):
 
 class TemplateFillerTool(BaseTool):
     name: str = "Preenchedor de Templates de Documentos"
-    description: str = "Use esta ferramenta para gerar um novo documento DOCX a partir de um template existente. Você precisa fornecer o nome do template (ex: 'proposta.docx') e um dicionário JSON com os dados de contexto para preenchimento."
+    description: str = "Use esta ferramenta para gerar um novo documento DOCX a partir de um template existente. Você precisa fornecer o nome do arquivo do template (ex: 'proposta.docx'), o ID do usuário dono do novo documento (owner_id), e um dicionário JSON com os dados de contexto para preenchimento."
 
     def _run(self, template_name: str, context: dict, owner_id: str) -> str:
-        """Preenche um template do GridFS, salva o novo arquivo e retorna seu ID."""
-        print(f"--- Ferramenta TemplateFillerTool executada para o template: {template_name} ---")
+        """
+        Preenche um template do GridFS com o contexto fornecido, salva o novo
+        arquivo associado ao owner_id e retorna o ID do novo documento.
+        """
+        print(f"--- Ferramenta TemplateFillerTool executada para o template: {template_name} por owner: {owner_id} ---")
+
+        # Validação crucial dos parâmetros
+        if not all([template_name, context, owner_id]):
+            return "Erro: A ferramenta 'Preenchedor de Templates' requer os parâmetros 'template_name', 'context', e 'owner_id'."
+
         db = get_db()
         fs = get_gridfs()
 
@@ -68,18 +76,21 @@ class TemplateFillerTool(BaseTool):
             final_doc_stream.seek(0)
             
             # Salva o novo documento no GridFS
-            novo_nome_arquivo = f"Documento_de_{template_name}"
+            novo_nome_arquivo = f"Documento_de_{template_name.replace('.docx', '')}.docx"
             output_file_id = fs.put(final_doc_stream, filename=novo_nome_arquivo)
             
             # Cria o metadado do novo documento
             output_doc_meta = {
                 "filename": novo_nome_arquivo,
                 "gridfs_file_id": output_file_id,
-                "owner_id": ObjectId(owner_id),
+                "owner_id": ObjectId(owner_id), # Usa o owner_id recebido
                 "created_at": datetime.utcnow()
             }
             output_doc = db.documents.insert_one(output_doc_meta)
 
             return f"Documento gerado com sucesso a partir do template '{template_name}'. O ID do metadado do novo documento é: {str(output_doc.inserted_id)}"
+        
+        except InvalidId:
+            return f"Erro: O owner_id '{owner_id}' fornecido não é um ID válido."
         except Exception as e:
             return f"Erro excepcional ao tentar preencher o template: {e}"

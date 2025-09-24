@@ -26,6 +26,8 @@ def processar_solicitacao_ia(message_id: str) -> str:
             return "Falha"
 
         conversation_id = mensagem_atual.get("conversation_id")
+        user_id = str(mensagem_atual.get("user_id")) # Pega o ID do usuário
+        
         historico_cursor = db.messages.find(
             {"conversation_id": conversation_id}
         ).sort("timestamp", 1)
@@ -38,46 +40,46 @@ def processar_solicitacao_ia(message_id: str) -> str:
 
         # 2. Montar a Equipe de Agentes (A Crew)
         
-        # A primeira tarefa é para o agente Roteador. Ele deve analisar o pedido
-        # e criar um plano detalhado para o próximo agente.
-        tarefa_analise_e_planejamento = Task(
+        tarefa_de_analise_e_planejamento = Task(
             description=(
-                "Sua tarefa é analisar o histórico de conversa abaixo e, especificamente, "
-                "o último pedido do 'user'. Com base nisso, você deve decidir qual ação o 'Especialista em Documentos' "
-                "deve tomar e formular uma instrução clara para ele.\n\n"
+                "Sua tarefa é analisar o histórico de conversa abaixo e o último pedido do 'user'. "
+                "Com base nisso, formule uma instrução clara para o 'Especialista em Documentos'.\n\n"
+                
+                f"**INFORMAÇÃO CRÍTICA:** O ID do usuário (owner_id) para qualquer novo documento é '{user_id}'. "
+                "Se você decidir usar a ferramenta 'Preenchedor de Templates', você DEVE incluir o parâmetro 'owner_id' "
+                "na sua instrução para o especialista.\n\n"
+
                 "**Ferramentas disponíveis para o Especialista:**\n"
-                "- 'Leitor de Arquivos do Usuário': Use para ler o conteúdo de um arquivo que o usuário anexou.\n"
-                "- 'Preenchedor de Templates': Use para preencher um template .docx com dados extraídos.\n\n"
+                "- 'Leitor de Arquivos do Usuário': Parâmetros: document_id (string).\n"
+                "- 'Preenchedor de Templates de Documentos': Parâmetros: template_name (string), context (dict), owner_id (string).\n\n"
                 "**Histórico da Conversa:**\n"
                 f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---\n\n"
                 "**Sua Resposta Final (Expected Output):**\n"
-                "Deve ser uma instrução direta e detalhada para o 'Especialista em Documentos'.\n"
-                "Exemplo 1: 'Use a ferramenta Leitor de Arquivos do Usuário com o ID do documento X para extrair o texto.'\n"
-                "Exemplo 2: 'Use a ferramenta Preenchedor de Templates com o template chamado \"proposta.docx\" e o seguinte contexto JSON: {{\"cliente\": \"ABC Corp\", \"valor\": 5000}}.'"
+                "Deve ser uma instrução direta para o 'Especialista em Documentos', especificando a ferramenta e TODOS os seus parâmetros. "
+                "Exemplo: 'Use a ferramenta Preenchedor de Templates de Documentos com os parâmetros: "
+                f"template_name=\"proposta.docx\", context={{\"cliente\": \"ABC Corp\"}}, owner_id=\"{user_id}\".'"
             ),
-            expected_output="Uma instrução clara e acionável para o próximo agente.",
+            expected_output="Uma instrução clara e acionável, incluindo a ferramenta e todos os seus parâmetros necessários.",
             agent=agente_roteador
         )
 
-        # A segunda tarefa é para o Executor. Ele pega o plano do Roteador e o executa.
-        tarefa_execucao = Task(
+        tarefa_de_execucao = Task(
             description=(
                 "Execute o plano de ação formulado pelo 'Analista e Roteador de Tarefas'. "
                 "Utilize as ferramentas à sua disposição para cumprir a instrução. "
                 "Seu resultado final será a saída direta da ferramenta que você usar."
             ),
-
             expected_output="O texto lido de um arquivo, ou uma mensagem de sucesso indicando o ID do documento gerado.",
             agent=agente_executor_de_arquivos,
-            context=[tarefa_analise_e_planejamento] # Depende da conclusão da primeira tarefa
+            context=[tarefa_de_analise_e_planejamento]
         )
 
         # Configura e executa a Crew
         crew = Crew(
             agents=[agente_roteador, agente_executor_de_arquivos],
-            tasks=[tarefa_analise_e_planejamento, tarefa_execucao],
+            tasks=[tarefa_de_analise_e_planejamento, tarefa_de_execucao],
             process=Process.sequential,
-            verbose=True # Use 2 para ver o "pensamento" dos agentes em detalhe
+            verbose=True
         )
 
         resultado_crew = crew.kickoff()
@@ -89,15 +91,22 @@ def processar_solicitacao_ia(message_id: str) -> str:
         # A lógica aqui pode ser refinada. Assumimos que o resultado da crew
         # é a resposta final do assistente.
         resposta_assistente = str(resultado_crew)
-        generated_doc_id = None # Lógica para extrair ID do resultado, se houver.
+        generated_doc_id = None
+        
+        # Tenta extrair o ID do documento da resposta da ferramenta
+        if "O ID do metadado do novo documento é:" in resposta_assistente:
+            try:
+                doc_id_str = resposta_assistente.split(":")[-1].strip()
+                generated_doc_id = ObjectId(doc_id_str)
+            except:
+                pass # Se falhar, o generated_doc_id continua None
 
-        # Salva a resposta final do assistente no chat
         assistant_message = {
             "conversation_id": conversation_id,
             "role": "assistant",
             "content": resposta_assistente,
             "generated_document_id": generated_doc_id,
-            "user_id": mensagem_atual.get("user_id"),
+            "user_id": ObjectId(user_id),
             "timestamp": datetime.utcnow()
         }
         db.messages.insert_one(assistant_message)
@@ -116,7 +125,7 @@ def processar_solicitacao_ia(message_id: str) -> str:
         db.messages.insert_one({
             "conversation_id": mensagem_atual.get("conversation_id") if 'mensagem_atual' in locals() else None,
             "role": "assistant",
-            "content": f"Ocorreu um erro interno ao processar sua solicitação com a equipe de IA.",
+            "content": f"Ocorreu um erro interno ao processar sua solicitação.",
             "user_id": mensagem_atual.get("user_id") if 'mensagem_atual' in locals() else None,
             "timestamp": datetime.utcnow(),
             "is_error": True

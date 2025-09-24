@@ -1,12 +1,18 @@
 # Arquivo: /src/tasks/agents.py
 
-from crewai import Agent
+from crewai import Agent, LLM
 from src.tasks.tools import FileReaderTool, TemplateFillerTool
+from src.config import Config
 
 # Instancia as ferramentas para que os agentes possam usá-las.
 # É importante instanciá-las apenas uma vez e reutilizá-las.
 file_reader_tool = FileReaderTool()
 template_filler_tool = TemplateFillerTool()
+
+llm = LLM(
+    model="gemini/gemini-2.5-flash-lite",
+    temperature=0.5
+)
 
 # --- DEFINIÇÃO DOS AGENTES DA EQUIPE ---
 
@@ -25,6 +31,7 @@ agente_roteador = Agent(
         "sua instrução deve ser 'Use a ferramenta Preenchedor de Templates...'. "
         "Sua saída é a entrada para o próximo agente."
     ),
+    llm=llm,
     allow_delegation=False, # Este agente planeja, mas não delega através de um sub-agente. A delegação é feita pela estrutura de tarefas da Crew.
     verbose=True
 )
@@ -38,6 +45,7 @@ agente_executor_de_arquivos = Agent(
         "Suas ferramentas são para ler arquivos e preencher templates. Sua resposta final "
         "é sempre o resultado direto da ferramenta que você usou."
     ),
+    llm=llm,
     tools=[file_reader_tool, template_filler_tool],
     allow_delegation=False,
     verbose=True
