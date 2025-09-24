@@ -192,3 +192,64 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
     - [x] Salva os arquivos de saída no GridFS e cria seus metadados.
     - [x] Cria a mensagem de resposta do assistente na coleção `messages`.
     - [x] Retorna um status de sucesso ou falha para a rota da API.
+    
+---
+
+### **Próximos Passos Funcionais para o Backend**
+
+#### **Prioridade 1: Dar "Memória" à IA**
+
+**Objetivo:** Fazer com que a IA entenda o contexto da conversa, permitindo interações de acompanhamento.
+
+-   **[ ] 1.1. Modificar a Tarefa de IA (`processar_solicitacao_ia`):**
+    -   Antes de chamar a API do Gemini, a função deve buscar **todas as mensagens anteriores** da `conversation_id` atual no MongoDB.
+    -   Formatar o histórico de mensagens em um formato que o Gemini entenda (geralmente uma lista de objetos com `role` e `content`).
+    -   Enviar o histórico completo junto com o novo prompt do usuário para a API do Gemini.
+
+---
+
+#### **Prioridade 2: Ativar a Interação com Arquivos**
+
+**Objetivo:** Permitir que a IA leia o conteúdo dos arquivos que os usuários enviam e use os templates para gerar documentos formatados.
+
+-   **[ ] 2.1. Criar "Ferramentas" de Leitura de Arquivos:**
+    -   Desenvolver uma função (`read_docx_from_gridfs`) que, dado um `file_id`, busca o arquivo `.docx` no GridFS e extrai seu texto.
+    -   Desenvolver uma função (`read_xlsx_from_gridfs`) que usa a biblioteca `pandas` para ler um arquivo `.xlsx` do GridFS e convertê-lo em um formato útil para a IA (como JSON ou Markdown).
+
+-   **[ ] 2.2. Habilitar o Uso de Templates (com `docxtpl`):**
+    -   Modificar a tarefa de IA para que, se o prompt do usuário mencionar um template, ela:
+        1.  Busque o arquivo do template (`.docx` com campos `{{ variavel }}`) do GridFS.
+        2.  Use a resposta do Gemini para criar um dicionário de "contexto" (ex: `{"nome_cliente": "Empresa X", ...}`).
+        3.  Use a biblioteca `docxtpl` para renderizar o template com o contexto, gerando o documento final preenchido.
+
+-   **[ ] 2.3. Atualizar a Rota de Mensagens:**
+    -   Modificar o endpoint `POST /api/chat/conversations` para que ele possa receber, opcionalmente, um `input_document_id` junto com o prompt.
+    -   Salvar este ID na mensagem do usuário na coleção `messages` para que a tarefa de IA saiba qual arquivo ler.
+
+---
+
+#### **Prioridade 3: Aumentar a Flexibilidade e o Controle do Usuário**
+
+**Objetivo:** Dar ao usuário mais controle sobre o resultado gerado.
+
+-   **[ ] 3.1. Geração de Arquivos Dinâmica:**
+    -   Modificar a tarefa de IA para que ela analise o prompt do usuário em busca de palavras-chave como "crie um PDF", "gere uma planilha" ou "faça um documento Word".
+    -   Com base nessa análise, a tarefa deve chamar a função de criação de stream correta (`criar_pdf_stream`, `criar_xlsx_stream`, etc.).
+
+-   **[ ] 3.2. Nomeação de Arquivos Inteligente:**
+    -   Implementar uma lógica (possivelmente usando a própria IA) para gerar um nome de arquivo relevante com base no conteúdo do prompt (ex: `relatorio_vendas_q3.pdf`), em vez de usar sempre "relatorio_gerado.docx".
+
+---
+
+#### **Prioridade 4: Robustez e Qualidade de Vida**
+
+**Objetivo:** Tornar o sistema mais robusto e fácil de gerenciar.
+
+-   **[ ] 4.1. Tratamento de Erros Específico:**
+    -   Dentro da tarefa de IA, adicionar blocos `try...except` específicos para falhas comuns (ex: API do Gemini indisponível, arquivo em formato inválido, template mal formatado).
+    -   Retornar mensagens de erro claras e úteis para o usuário no chat.
+
+-   **[ ] 4.2. Roles de Usuário (Admin vs. Usuário Comum):**
+    -   Adicionar um campo `role` (ex: "admin", "user") na coleção `users`.
+    -   Modificar o endpoint de upload de templates (`POST /api/templates/upload`) para que apenas usuários com a role "admin" possam acessá-lo.
+    -   Criar endpoints de administração para gerenciar usuários e templates.
