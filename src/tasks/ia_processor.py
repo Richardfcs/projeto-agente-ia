@@ -7,7 +7,7 @@ from bson import ObjectId
 from crewai import Crew, Process, Task
 
 from src.db.mongo import get_db, get_gridfs
-from src.tasks.agents import agente_roteador, agente_executor_de_arquivos
+from src.tasks.agents import agente_roteador, agente_executor_de_arquivos, agente_conversador
 
 # Esta função principal é a única que precisa ser importada pelas rotas.
 def processar_solicitacao_ia(message_id: str) -> str:
@@ -42,25 +42,34 @@ def processar_solicitacao_ia(message_id: str) -> str:
         
         tarefa_de_analise_e_planejamento = Task(
             description=(
-                "Sua tarefa é analisar o histórico de conversa abaixo e o último pedido do 'user'. "
-                "Com base nisso, formule uma instrução clara para o 'Especialista em Documentos'.\n\n"
+                "Sua tarefa é analisar o histórico de conversa abaixo e, especificamente, o último pedido do 'user'. "
+                "Primeiro, decida a intenção principal: é uma pergunta geral (que pode ser respondida com texto) ou uma tarefa que requer o uso de ferramentas de arquivo?\n\n"
                 
-                f"**INFORMAÇÃO CRÍTICA:** O ID do usuário (owner_id) para qualquer novo documento é '{user_id}'. "
-                "Se você decidir usar a ferramenta 'Preenchedor de Templates', você DEVE incluir o parâmetro 'owner_id' "
-                "na sua instrução para o especialista.\n\n"
+                "**REGRAS DE DECISÃO:**\n"
+                "1. Se for uma pergunta geral (ex: 'o que é IA?', 'como você funciona?', 'me dê dicas sobre X'), "
+                "sua instrução final deve ser delegar a tarefa para o 'Especialista em Conversação'.\n"
+                "2. Se o pedido envolve ler, criar ou modificar um documento ou template, sua instrução final "
+                "deve ser delegar a tarefa para o 'Especialista em Documentos e Ferramentas', incluindo todos os parâmetros necessários.\n\n"
 
-                "**Ferramentas disponíveis para o Especialista:**\n"
-                "- 'Leitor de Arquivos do Usuário': Parâmetros: document_id (string).\n"
-                "- 'Preenchedor de Templates de Documentos': Parâmetros: template_name (string), context (dict), owner_id (string).\n\n"
+                f"**INFORMAÇÃO CRÍTICA (se aplicável):** O ID do usuário (owner_id) é '{user_id}'.\n\n"
+                
                 "**Histórico da Conversa:**\n"
                 f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---\n\n"
+                
                 "**Sua Resposta Final (Expected Output):**\n"
-                "Deve ser uma instrução direta para o 'Especialista em Documentos', especificando a ferramenta e TODOS os seus parâmetros. "
-                "Exemplo: 'Use a ferramenta Preenchedor de Templates de Documentos com os parâmetros: "
-                f"template_name=\"proposta.docx\", context={{\"cliente\": \"ABC Corp\"}}, owner_id=\"{user_id}\".'"
+                "Uma descrição de tarefa para o especialista apropriado (Conversação ou Documentos)."
             ),
-            expected_output="Uma instrução clara e acionável, incluindo a ferramenta e todos os seus parâmetros necessários.",
+            expected_output="Uma descrição de tarefa clara e acionável para o próximo agente especialista.",
             agent=agente_roteador
+        )
+
+        tarefa_de_conversacao = Task(
+            description=(
+                "Responda à pergunta do usuário contida no plano do 'Analista e Roteador de Tarefas'."
+            ),
+            expected_output="Uma resposta em texto, clara e concisa.",
+            agent=agente_conversador,
+            context=[tarefa_de_analise_e_planejamento]
         )
 
         tarefa_de_execucao = Task(
@@ -76,9 +85,9 @@ def processar_solicitacao_ia(message_id: str) -> str:
 
         # Configura e executa a Crew
         crew = Crew(
-            agents=[agente_roteador, agente_executor_de_arquivos],
-            tasks=[tarefa_de_analise_e_planejamento, tarefa_de_execucao],
-            process=Process.sequential,
+            agents=[agente_roteador, agente_executor_de_arquivos, agente_conversador],
+            tasks=[tarefa_de_analise_e_planejamento, tarefa_de_execucao, tarefa_de_conversacao],
+            process=Process.sequential, # Mesmo sequencial, a delegação do roteador direciona o fluxo.
             verbose=True
         )
 

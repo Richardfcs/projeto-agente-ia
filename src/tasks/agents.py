@@ -32,7 +32,7 @@ agente_roteador = Agent(
         "Sua saída é a entrada para o próximo agente."
     ),
     llm=llm,
-    allow_delegation=False, # Este agente planeja, mas não delega através de um sub-agente. A delegação é feita pela estrutura de tarefas da Crew.
+    allow_delegation=True,
     verbose=True
 )
 
@@ -47,6 +47,20 @@ agente_executor_de_arquivos = Agent(
     ),
     llm=llm,
     tools=[file_reader_tool, template_filler_tool],
+    allow_delegation=False,
+    verbose=True
+)
+
+agente_conversador = Agent(
+    role="Especialista em Conversação",
+    goal="Responder diretamente a perguntas gerais do usuário de forma clara e concisa.",
+    backstory=(
+        "Você é um assistente de IA amigável e prestativo. Sua especialidade é manter uma conversa fluida. "
+        "Você não usa ferramentas; apenas usa seu conhecimento para responder perguntas sobre tecnologia, "
+        "o funcionamento do sistema ou qualquer outro tópico geral."
+    ),
+    llm=llm,
+    tools=[],
     allow_delegation=False,
     verbose=True
 )
