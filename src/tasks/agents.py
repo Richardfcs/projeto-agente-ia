@@ -1,19 +1,23 @@
 # Arquivo: /src/tasks/agents.py
 
 from crewai import Agent, LLM
-from src.tasks.tools import FileReaderTool, TemplateFillerTool, SimpleDocumentGeneratorTool
+from src.tasks.tools import FileReaderTool, TemplateFillerTool, SimpleDocumentGeneratorTool, DatabaseQueryTool
 from src.config import Config
 
-# Instancia as ferramentas para que os agentes possam usá-las.
-# É importante instanciá-las apenas uma vez e reutilizá-las.
+# --- CONFIGURAÇÃO DO LLM ---
+# Recomenda-se usar um modelo estável e publicamente disponível.
+llm = LLM(
+    model="gemini/gemini-2.5-flash",
+    temperature=0.8
+)
+
+# --- INSTÂNCIA DAS FERRAMENTAS ---
+# É uma boa prática instanciar todas as ferramentas aqui.
 file_reader_tool = FileReaderTool()
 template_filler_tool = TemplateFillerTool()
 simple_doc_generator_tool = SimpleDocumentGeneratorTool()
+database_query_tool = DatabaseQueryTool()
 
-llm = LLM(
-    model="gemini/gemini-2.5-flash",
-    temperature=0.5
-)
 
 # --- DEFINIÇÃO DOS AGENTES DA EQUIPE ---
 
@@ -25,8 +29,8 @@ agente_roteador = Agent(
         "Sua especialidade é criar prompts e instruções para outros agentes. Você nunca executa o trabalho, apenas o planeja com perfeição."
     ),
     llm=llm,
-    tools=[],
-    allow_delegation=True,
+    tools=[], # O gerente planeja, não executa ferramentas.
+    allow_delegation=True, # Essencial para que ele possa delegar tarefas.
     verbose=True
 )
 
@@ -35,10 +39,16 @@ agente_executor_de_arquivos = Agent(
     goal="Executar planos de ação de manipulação de documentos usando as ferramentas fornecidas.",
     backstory=(
         "Você é o executor. Você recebe um plano de ação e o segue à risca. Sua única função é invocar as "
-        "ferramentas (`FileReaderTool`, `TemplateFillerTool`) exatamente como instruído."
+        "ferramentas (`FileReaderTool`, `TemplateFillerTool`, `SimpleDocumentGeneratorTool`, etc.) exatamente como instruído."
     ),
     llm=llm,
-    tools=[file_reader_tool, template_filler_tool],
+    # A lista de ferramentas agora está completa com todas as nossas capacidades.
+    tools=[
+        file_reader_tool,
+        template_filler_tool,
+        simple_doc_generator_tool,
+        database_query_tool
+    ],
     allow_delegation=False,
     verbose=True
 )

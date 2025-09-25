@@ -5,29 +5,30 @@ from datetime import datetime
 from bson import ObjectId
 
 from crewai import Crew, Process, Task
-
-from src.db.mongo import get_db, get_gridfs
+from src.db.mongo import get_db
+# Importa todos os agentes que a Crew pode precisar
 from src.tasks.agents import agente_roteador, agente_executor_de_arquivos, agente_conversador
 
 # Esta função principal é a única que precisa ser importada pelas rotas.
 def processar_solicitacao_ia(message_id: str) -> str:
     """
-    Orquestra uma equipe de agentes de IA (CrewAI) para processar uma solicitação
-    de usuário, com memória de conversa e capacidade de usar ferramentas.
+    Orquestra uma equipe de agentes de IA usando um processo hierárquico
+    para processar uma solicitação de usuário de forma inteligente.
     """
-    print(f"Orquestrando CrewAI para a mensagem: {message_id}")
+    print(f"Orquestrando CrewAI com processo hierárquico para a mensagem: {message_id}")
     db = get_db()
     
     try:
-        # 1. Obter Contexto da Conversa
+        # 1. Obter Contexto Completo da Conversa
         mensagem_atual = db.messages.find_one({"_id": ObjectId(message_id)})
         if not mensagem_atual:
             print(f"ERRO: Mensagem com ID {message_id} não encontrada.")
             return "Falha"
 
         conversation_id = mensagem_atual.get("conversation_id")
-        user_id = str(mensagem_atual.get("user_id")) # Pega o ID do usuário
-        
+        user_id = str(mensagem_atual.get("user_id"))
+        input_doc_id = str(mensagem_atual.get("input_document_id")) if mensagem_atual.get("input_document_id") else "Nenhum"
+
         historico_cursor = db.messages.find(
             {"conversation_id": conversation_id}
         ).sort("timestamp", 1)
@@ -38,47 +39,40 @@ def processar_solicitacao_ia(message_id: str) -> str:
             [f"{msg['role']}: {msg['content']}" for msg in historico_completo]
         )
 
-        # pegar contexto do documento
-        
-        input_doc_id = None
-        if mensagem_atual.get("input_document_id"):
-            input_doc_id = str(mensagem_atual.get("input_document_id"))
-
-        # 2. Montar as Tarefas Encadeadas
-        
-        # Tarefa 1: O Roteador cria o plano.
-        tarefa_de_planejamento = Task(
+        # 2. Montar a Tarefa Principal para o Gerente
+        tarefa_principal = Task(
             description=(
-                "Crie um plano de ação detalhado para um 'Especialista em Documentos'. "
-                "O plano deve instruir o especialista sobre qual ferramenta usar e com quais parâmetros exatos.\n\n"
+                "Você é o gerente. Sua tarefa é analisar o pedido do usuário e o histórico para delegar o trabalho ao especialista correto. "
+                "Siga as regras de decisão abaixo.\n\n"
+
+                "**NOVA REGRA IMPORTANTE:** Se a ação envolve criar um documento, você DEVE inferir um nome de arquivo descritivo "
+                "e relevante a partir do contexto (ex: 'proposta_cliente_x.docx') e incluí-lo como o parâmetro 'output_filename' "
+                "na sua delegação para o especialista.\n\n"
+
+                "**REGRAS DE DECISÃO (EM ORDEM DE PRIORIDADE):**\n"
+                "1. **VERIFIQUE O HISTÓRICO:** Se a resposta já estiver no histórico, delegue ao 'Especialista em Conversação' com a resposta pronta.\n"
+                "2. **USE FERRAMENTAS:** Se precisar de ferramentas, delegue ao 'Especialista em Documentos' com um plano de ação claro, especificando a ferramenta e TODOS os parâmetros necessários ('document_id', 'context', 'owner_id', 'output_filename', etc.).\n"
+                "3. **PERGUNTA GERAL:** Se for uma pergunta geral, delegue ao 'Especialista em Conversação'.\n\n"
+
                 f"**INFORMAÇÕES DISPONÍVEIS:**\n"
                 f"- ID do usuário (owner_id): '{user_id}'\n"
                 f"- ID do documento anexado: '{input_doc_id}'\n\n"
+
                 "**Histórico da Conversa:**\n"
                 f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---"
             ),
-            expected_output="Um texto claro e detalhado contendo o plano de ação para o especialista.",
-            agent=agente_roteador
-        )
-
-        # Tarefa 2: O Executor recebe o plano do Roteador e o executa.
-        tarefa_de_execucao = Task(
-            description=(
-                "Siga o plano de ação fornecido para completar a solicitação do usuário. "
-                "Execute as ferramentas exatamente como descrito no plano."
+            expected_output=(
+                "O resultado final da tarefa que foi delegada. Pode ser uma resposta em texto ou o resultado da execução de uma ferramenta."
             ),
-            expected_output="O resultado final da execução da(s) ferramenta(s).",
-            agent=agente_executor_de_arquivos,
-            # ESTA É A LINHA MÁGICA:
-            # O resultado da `tarefa_de_planejamento` será injetado no contexto desta tarefa.
-            context=[tarefa_de_planejamento]
+            agent=agente_roteador # Esta tarefa é entregue ao gerente para ele orquestrar.
         )
 
-        # 3. Montar a Crew com Processo Sequencial
+        # 3. Montar e Executar a Crew com Processo Hierárquico
         crew = Crew(
-            agents=[agente_roteador, agente_executor_de_arquivos],
-            tasks=[tarefa_de_planejamento, tarefa_de_execucao],
-            process=Process.sequential,
+            agents=[agente_executor_de_arquivos, agente_conversador], # A lista de trabalhadores que o gerente pode usar.
+            tasks=[tarefa_principal], # Apenas a tarefa principal a ser gerenciada.
+            process=Process.hierarchical,
+            manager_llm=agente_roteador.llm, # O cérebro do gerente.
             verbose=True
         )
 
@@ -86,7 +80,7 @@ def processar_solicitacao_ia(message_id: str) -> str:
 
         print(f"Resultado final da Crew: {resultado_crew}")
 
-        # 3. Processar o Resultado e Atualizar o Banco de Dados
+        # 4. Processar o Resultado e Atualizar o Banco de Dados
         
         # A lógica aqui pode ser refinada. Assumimos que o resultado da crew
         # é a resposta final do assistente.
@@ -99,7 +93,7 @@ def processar_solicitacao_ia(message_id: str) -> str:
                 doc_id_str = resposta_assistente.split(":")[-1].strip()
                 generated_doc_id = ObjectId(doc_id_str)
             except:
-                pass # Se falhar, o generated_doc_id continua None
+                pass 
 
         assistant_message = {
             "conversation_id": conversation_id,

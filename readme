@@ -199,17 +199,17 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 
 **Objetivo:** Aumentar drasticamente a capacidade da IA de entender e executar uma gama maior de tarefas relacionadas a documentos.
 
-*   **[ ] 1. Implementar um "Agente Conversador" para Respostas Diretas:**
+*   **[x] 1. Implementar um "Agente Conversador" para Respostas Diretas:**
     *   **Tarefa:** Criar um novo agente, `agente_conversador`, que não possui ferramentas.
     *   **Lógica:** Modificar o `agente_roteador` para que ele possa delegar a tarefa a este novo agente se a intenção do usuário for apenas uma pergunta geral. Isso evita que a Crew tente usar ferramentas desnecessariamente.
 
-*   **[ ] 2. Criar Ferramenta de Geração de Documentos Simples:**
+*   **[x] 2. Criar Ferramenta de Geração de Documentos Simples:**
     *   **Tarefa:** Desenvolver uma nova `SimpleDocumentGeneratorTool` em `tools.py`.
     *   **Parâmetros:** `content` (o texto a ser inserido) e `file_format` ("docx", "pdf", etc.).
     *   **Ação:** A ferramenta chamará a função `criar_docx_stream` ou `criar_pdf_stream` correspondente.
     *   **Integração:** Adicionar esta ferramenta ao `agente_executor_de_arquivos` e ensinar o `agente_roteador` a usá-la.
 
-*   **[ ] 3. Habilitar a Extração de Contexto de Arquivos Anexados:**
+*   **[x] 3. Habilitar a Extração de Contexto de Arquivos Anexados:**
     *   **Tarefa:** Refinar a `backstory` e a `goal` do `agente_roteador`.
     *   **Lógica:** Instruí-lo a, quando o usuário pedir para preencher um template e anexar um arquivo, primeiro usar a `FileReaderTool` para extrair o conteúdo do anexo e, em seguida, usar esse conteúdo para construir o dicionário de `context` para a `TemplateFillerTool`. Isso pode exigir um passo intermediário ou um agente adicional.
 
@@ -217,7 +217,7 @@ Este documento rastreia o progresso do desenvolvimento do backend. Marque as cai
 
 **Objetivo:** Dar ao usuário mais controle sobre seus dados e tornar o sistema mais intuitivo.
 
-*   **[ ] 4. Implementar Nomeação de Arquivos Inteligente:**
+*   **[x] 4. Implementar Nomeação de Arquivos Inteligente:**
     *   **Tarefa:** Adicionar um novo parâmetro `output_filename` à `TemplateFillerTool` e à `SimpleDocumentGeneratorTool`.
     *   **Lógica:** Ensinar o `agente_roteador` a extrair um nome de arquivo apropriado do prompt do usuário ou a criar um com base no contexto (ex: "proposta_cliente_x.docx"). Se nenhum nome for sugerido, um nome padrão será usado.
 
