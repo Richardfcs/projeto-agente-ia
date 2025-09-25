@@ -8,6 +8,7 @@ from docx import Document
 from docxtpl import DocxTemplate
 from crewai.tools import BaseTool
 from src.db.mongo import get_db, get_gridfs
+from src.tasks.file_generators import criar_docx_stream, criar_xlsx_stream, criar_pdf_stream
 
 class FileReaderTool(BaseTool):
     name: str = "Leitor de Arquivos do Usuário"
@@ -94,3 +95,58 @@ class TemplateFillerTool(BaseTool):
             return f"Erro: O owner_id '{owner_id}' fornecido não é um ID válido."
         except Exception as e:
             return f"Erro excepcional ao tentar preencher o template: {e}"
+
+class SimpleDocumentGeneratorTool(BaseTool):
+    name: str = "Gerador de Documentos Simples"
+    description: str = "Use esta ferramenta para criar um novo documento (DOCX, XLSX ou PDF) a partir de um bloco de texto. Você precisa fornecer o nome do arquivo de saída (output_filename), o conteúdo de texto (content) e o ID do usuário dono (owner_id)."
+
+    def _run(self, output_filename: str, content: str, owner_id: str) -> str:
+        """
+        Cria um arquivo em um formato especificado a partir de um texto,
+        salva-o no GridFS e retorna o ID do novo documento.
+        """
+        print(f"--- Ferramenta SimpleDocumentGeneratorTool executada para criar: {output_filename} ---")
+        
+        if not all([output_filename, content, owner_id]):
+            return "Erro: A ferramenta 'Gerador de Documentos Simples' requer os parâmetros 'output_filename', 'content' e 'owner_id'."
+            
+        db = get_db()
+        fs = get_gridfs()
+        
+        # Converte o conteúdo de texto para uma lista de "tópicos"
+        # que nossas funções de stream esperam.
+        topicos = [linha.strip() for linha in content.split('\n') if linha.strip()]
+        
+        # Lógica para escolher a função de criação de stream correta
+        file_format = output_filename.split('.')[-1].lower()
+        arquivo_stream = None
+        
+        if file_format == 'docx':
+            arquivo_stream = criar_docx_stream(topicos)
+        elif file_format == 'xlsx':
+            arquivo_stream = criar_xlsx_stream(topicos)
+        elif file_format == 'pdf':
+            arquivo_stream = criar_pdf_stream(topicos)
+        else:
+            return f"Erro: Formato de arquivo '{file_format}' não suportado. Use 'docx', 'xlsx' ou 'pdf'."
+
+        if not arquivo_stream:
+            return "Erro: Falha ao gerar o stream do arquivo."
+
+        try:
+            # Salva o novo documento no GridFS
+            output_file_id = fs.put(arquivo_stream, filename=output_filename)
+            
+            # Cria o metadado do novo documento
+            output_doc_meta = {
+                "filename": output_filename,
+                "gridfs_file_id": output_file_id,
+                "owner_id": ObjectId(owner_id),
+                "created_at": datetime.utcnow()
+            }
+            output_doc = db.documents.insert_one(output_doc_meta)
+
+            return f"Documento '{output_filename}' gerado com sucesso. O ID do metadado do novo documento é: {str(output_doc.inserted_id)}"
+
+        except Exception as e:
+            return f"Erro excepcional ao tentar gerar o documento simples: {e}"

@@ -1,13 +1,14 @@
 # Arquivo: /src/tasks/agents.py
 
 from crewai import Agent, LLM
-from src.tasks.tools import FileReaderTool, TemplateFillerTool
+from src.tasks.tools import FileReaderTool, TemplateFillerTool, SimpleDocumentGeneratorTool
 from src.config import Config
 
 # Instancia as ferramentas para que os agentes possam usá-las.
 # É importante instanciá-las apenas uma vez e reutilizá-las.
 file_reader_tool = FileReaderTool()
 template_filler_tool = TemplateFillerTool()
+simple_doc_generator_tool = SimpleDocumentGeneratorTool()
 
 llm = LLM(
     model="gemini/gemini-2.5-flash-lite",
@@ -46,7 +47,7 @@ agente_executor_de_arquivos = Agent(
         "é sempre o resultado direto da ferramenta que você usou."
     ),
     llm=llm,
-    tools=[file_reader_tool, template_filler_tool],
+    tools=[file_reader_tool, template_filler_tool, simple_doc_generator_tool],
     allow_delegation=False,
     verbose=True
 )

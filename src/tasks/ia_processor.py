@@ -42,22 +42,22 @@ def processar_solicitacao_ia(message_id: str) -> str:
         
         tarefa_de_analise_e_planejamento = Task(
             description=(
-                "Sua tarefa é analisar o histórico de conversa abaixo e, especificamente, o último pedido do 'user'. "
-                "Primeiro, decida a intenção principal: é uma pergunta geral (que pode ser respondida com texto) ou uma tarefa que requer o uso de ferramentas de arquivo?\n\n"
+                "Sua tarefa é analisar o histórico de conversa e o último pedido do 'user'. "
+                "Decida a intenção principal: é uma pergunta, uma tarefa de template, ou uma tarefa de criação de documento simples?\n\n"
                 
                 "**REGRAS DE DECISÃO:**\n"
-                "1. Se for uma pergunta geral (ex: 'o que é IA?', 'como você funciona?', 'me dê dicas sobre X'), "
-                "sua instrução final deve ser delegar a tarefa para o 'Especialista em Conversação'.\n"
-                "2. Se o pedido envolve ler, criar ou modificar um documento ou template, sua instrução final "
-                "deve ser delegar a tarefa para o 'Especialista em Documentos e Ferramentas', incluindo todos os parâmetros necessários.\n\n"
-
-                f"**INFORMAÇÃO CRÍTICA (se aplicável):** O ID do usuário (owner_id) é '{user_id}'.\n\n"
+                "1. Se for uma pergunta geral, delegue ao 'Especialista em Conversação'.\n"
+                "2. Se o pedido envolve usar um template existente, delegue ao 'Especialista em Documentos' para usar a ferramenta 'Preenchedor de Templates'.\n"
+                "3. Se o pedido envolve pegar um texto (um resumo, uma lista, etc.) e salvá-lo em um novo arquivo, "
+                "delegue ao 'Especialista em Documentos' para usar a ferramenta 'Gerador de Documentos Simples'. Você deve extrair ou inferir o nome do arquivo de saída e o conteúdo.\n\n"
+                
+                f"**INFORMAÇÃO CRÍTICA:** O ID do usuário (owner_id) é '{user_id}'.\n\n"
                 
                 "**Histórico da Conversa:**\n"
                 f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---\n\n"
                 
                 "**Sua Resposta Final (Expected Output):**\n"
-                "Uma descrição de tarefa para o especialista apropriado (Conversação ou Documentos)."
+                "Uma descrição de tarefa para o especialista apropriado, incluindo a ferramenta e TODOS os parâmetros necessários."
             ),
             expected_output="Uma descrição de tarefa clara e acionável para o próximo agente especialista.",
             agent=agente_roteador
