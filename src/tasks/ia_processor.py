@@ -38,56 +38,47 @@ def processar_solicitacao_ia(message_id: str) -> str:
             [f"{msg['role']}: {msg['content']}" for msg in historico_completo]
         )
 
-        # 2. Montar a Equipe de Agentes (A Crew)
+        # pegar contexto do documento
         
-        tarefa_de_analise_e_planejamento = Task(
+        input_doc_id = None
+        if mensagem_atual.get("input_document_id"):
+            input_doc_id = str(mensagem_atual.get("input_document_id"))
+
+        # 2. Montar as Tarefas Encadeadas
+        
+        # Tarefa 1: O Roteador cria o plano.
+        tarefa_de_planejamento = Task(
             description=(
-                "Sua tarefa é analisar o histórico de conversa e o último pedido do 'user'. "
-                "Decida a intenção principal: é uma pergunta, uma tarefa de template, ou uma tarefa de criação de documento simples?\n\n"
-                
-                "**REGRAS DE DECISÃO:**\n"
-                "1. Se for uma pergunta geral, delegue ao 'Especialista em Conversação'.\n"
-                "2. Se o pedido envolve usar um template existente, delegue ao 'Especialista em Documentos' para usar a ferramenta 'Preenchedor de Templates'.\n"
-                "3. Se o pedido envolve pegar um texto (um resumo, uma lista, etc.) e salvá-lo em um novo arquivo, "
-                "delegue ao 'Especialista em Documentos' para usar a ferramenta 'Gerador de Documentos Simples'. Você deve extrair ou inferir o nome do arquivo de saída e o conteúdo.\n\n"
-                
-                f"**INFORMAÇÃO CRÍTICA:** O ID do usuário (owner_id) é '{user_id}'.\n\n"
-                
+                "Crie um plano de ação detalhado para um 'Especialista em Documentos'. "
+                "O plano deve instruir o especialista sobre qual ferramenta usar e com quais parâmetros exatos.\n\n"
+                f"**INFORMAÇÕES DISPONÍVEIS:**\n"
+                f"- ID do usuário (owner_id): '{user_id}'\n"
+                f"- ID do documento anexado: '{input_doc_id}'\n\n"
                 "**Histórico da Conversa:**\n"
-                f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---\n\n"
-                
-                "**Sua Resposta Final (Expected Output):**\n"
-                "Uma descrição de tarefa para o especialista apropriado, incluindo a ferramenta e TODOS os parâmetros necessários."
+                f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---"
             ),
-            expected_output="Uma descrição de tarefa clara e acionável para o próximo agente especialista.",
+            expected_output="Um texto claro e detalhado contendo o plano de ação para o especialista.",
             agent=agente_roteador
         )
 
-        tarefa_de_conversacao = Task(
-            description=(
-                "Responda à pergunta do usuário contida no plano do 'Analista e Roteador de Tarefas'."
-            ),
-            expected_output="Uma resposta em texto, clara e concisa.",
-            agent=agente_conversador,
-            context=[tarefa_de_analise_e_planejamento]
-        )
-
+        # Tarefa 2: O Executor recebe o plano do Roteador e o executa.
         tarefa_de_execucao = Task(
             description=(
-                "Execute o plano de ação formulado pelo 'Analista e Roteador de Tarefas'. "
-                "Utilize as ferramentas à sua disposição para cumprir a instrução. "
-                "Seu resultado final será a saída direta da ferramenta que você usar."
+                "Siga o plano de ação fornecido para completar a solicitação do usuário. "
+                "Execute as ferramentas exatamente como descrito no plano."
             ),
-            expected_output="O texto lido de um arquivo, ou uma mensagem de sucesso indicando o ID do documento gerado.",
+            expected_output="O resultado final da execução da(s) ferramenta(s).",
             agent=agente_executor_de_arquivos,
-            context=[tarefa_de_analise_e_planejamento]
+            # ESTA É A LINHA MÁGICA:
+            # O resultado da `tarefa_de_planejamento` será injetado no contexto desta tarefa.
+            context=[tarefa_de_planejamento]
         )
 
-        # Configura e executa a Crew
+        # 3. Montar a Crew com Processo Sequencial
         crew = Crew(
-            agents=[agente_roteador, agente_executor_de_arquivos, agente_conversador],
-            tasks=[tarefa_de_analise_e_planejamento, tarefa_de_execucao, tarefa_de_conversacao],
-            process=Process.sequential, # Mesmo sequencial, a delegação do roteador direciona o fluxo.
+            agents=[agente_roteador, agente_executor_de_arquivos],
+            tasks=[tarefa_de_planejamento, tarefa_de_execucao],
+            process=Process.sequential,
             verbose=True
         )
 

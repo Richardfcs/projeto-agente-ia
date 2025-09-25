@@ -4,6 +4,7 @@ import io
 import pandas as pd
 from datetime import datetime
 from bson import ObjectId
+from bson.errors import InvalidId
 from docx import Document
 from docxtpl import DocxTemplate
 from crewai.tools import BaseTool
