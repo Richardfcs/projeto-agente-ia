@@ -39,40 +39,62 @@ def processar_solicitacao_ia(message_id: str) -> str:
             [f"{msg['role']}: {msg['content']}" for msg in historico_completo]
         )
 
-        # 2. Montar a Tarefa Principal para o Gerente
-        tarefa_principal = Task(
+        # Tarefa 1: O Roteador cria o plano de ação.
+        tarefa_de_planejamento = Task(
             description=(
-                "Você é o gerente. Sua tarefa é analisar o pedido do usuário e o histórico para delegar o trabalho ao especialista correto. "
-                "Siga as regras de decisão abaixo.\n\n"
+                "Você é o gerente de projetos. Sua tarefa é analisar o pedido do usuário e o histórico para criar um plano de ação claro e acionável para um especialista. Siga as regras de decisão abaixo.\n\n"
 
-                "**NOVA REGRA IMPORTANTE:** Se a ação envolve criar um documento, você DEVE inferir um nome de arquivo descritivo "
-                "e relevante a partir do contexto (ex: 'proposta_cliente_x.docx') e incluí-lo como o parâmetro 'output_filename' "
-                "na sua delegação para o especialista.\n\n"
+                "--- INFORMAÇÕES E REGRAS ATUALIZADAS ---\n"
+                "1. **Template Principal Disponível:** Existe um template oficial chamado `TEMPLATE_TPF.docx`. Se o usuário pedir um 'relatório de engenharia', 'relatório TPF' ou similar, você deve priorizar o uso deste template.\n\n"
+                
+                "2. **ESTRUTURA DE DADOS DO TEMPLATE TPF:** Para preencher o `TEMPLATE_TPF.docx`, a ferramenta 'Preenchedor de Templates' precisa de um `context` com a seguinte estrutura JSON. Sua tarefa é extrair as informações do prompt do usuário para preencher o máximo de campos possível. Se uma informação não for fornecida, omita a chave do JSON final.\n"
+                "\n"
+                "{\n"
+                "  \"titulo_documento\": \"(string)\",\n"
+                "  \"subtitulo_documento\": \"(string)\",\n"
+                "  \"data_documento\": \"(string)\",\n"
+                "  \"secao_1_titulo\": \"(string)\",\n"
+                "  \"secao_1_conteudo\": \"(string)\",\n"
+                "  \"secao_1_sub_1_titulo\": \"(string)\",\n"
+                "  \"secao_1_sub_1_conteudo\": \"(string)\",\n"
+                "  \"dados_coletados\": [{\"local\": \"(string)\", \"med_A\": \"(valor)\", \"med_B\": \"(valor)\"}],\n"
+                "  \"texto_conclusao\": \"(string)\"\n"
+                "}\n"
+                "\n"
+                "3. **Nomeação de Arquivos:** Sempre que uma ferramenta de criação de documento for usada, você DEVE inferir um nome de arquivo descritivo e relevante a partir do contexto (ex: 'inspecao_barragem_norte.docx') e incluí-lo como o parâmetro 'output_filename'.\n\n"
 
-                "**REGRAS DE DECISÃO (EM ORDEM DE PRIORIDADE):**\n"
-                "1. **VERIFIQUE O HISTÓRICO:** Se a resposta já estiver no histórico, delegue ao 'Especialista em Conversação' com a resposta pronta.\n"
-                "2. **USE FERRAMENTAS:** Se precisar de ferramentas, delegue ao 'Especialista em Documentos' com um plano de ação claro, especificando a ferramenta e TODOS os parâmetros necessários ('document_id', 'context', 'owner_id', 'output_filename', etc.).\n"
-                "3. **PERGUNTA GERAL:** Se for uma pergunta geral, delegue ao 'Especialista em Conversação'.\n\n"
+                "--- REGRAS DE DECISÃO (EM ORDEM DE PRIORIDADE) ---\n"
+                "A. **VERIFIQUE O HISTÓRICO:** Se a resposta já estiver no histórico, delegue ao 'Especialista em Conversação' com a resposta pronta.\n"
+                "B. **USE FERRAMENTAS:** Se a resposta não estiver no histórico, delegue ao 'Especialista em Documentos' com um plano de ação claro, especificando a ferramenta e TODOS os parâmetros necessários.\n"
+                "C. **PERGUNTA GERAL:** Se for uma pergunta geral, delegue ao 'Especialista em Conversação'.\n\n"
 
-                f"**INFORMAÇÕES DISPONÍVEIS:**\n"
+                f"--- INFORMAÇÕES DISPONÍVEIS PARA A TAREFA ---\n"
                 f"- ID do usuário (owner_id): '{user_id}'\n"
                 f"- ID do documento anexado: '{input_doc_id}'\n\n"
 
-                "**Histórico da Conversa:**\n"
-                f"--- INÍCIO DO HISTÓRICO ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---"
+                f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}\n--- FIM DO HISTÓRICO ---"
             ),
             expected_output=(
-                "O resultado final da tarefa que foi delegada. Pode ser uma resposta em texto ou o resultado da execução de uma ferramenta."
+                "Uma instrução final clara e acionável para o especialista apropriado. Se for para preencher o template TPF, "
+                "a instrução DEVE conter a chamada para `TemplateFillerTool` com `template_name='TEMPLATE_TPF.docx'` e o `context` "
+                "JSON completo com todos os campos extraídos do prompt do usuário."
             ),
-            agent=agente_roteador # Esta tarefa é entregue ao gerente para ele orquestrar.
+            agent=agente_roteador
         )
 
-        # 3. Montar e Executar a Crew com Processo Hierárquico
+        # Tarefa 2: O Executor segue o plano que o Roteador criou.
+        tarefa_de_execucao = Task(
+            description="Execute o plano de ação fornecido pelo Gerente de Projetos.",
+            expected_output="O resultado final da execução da ferramenta.",
+            agent=agente_executor_de_arquivos,
+            context=[tarefa_de_planejamento] # Usa o plano da tarefa anterior como sua instrução.
+        )
+
+        # Crew com Processo Sequencial Explícito
         crew = Crew(
-            agents=[agente_executor_de_arquivos, agente_conversador], # A lista de trabalhadores que o gerente pode usar.
-            tasks=[tarefa_principal], # Apenas a tarefa principal a ser gerenciada.
-            process=Process.hierarchical,
-            manager_llm=agente_roteador.llm, # O cérebro do gerente.
+            agents=[agente_roteador, agente_executor_de_arquivos],
+            tasks=[tarefa_de_planejamento, tarefa_de_execucao],
+            process=Process.sequential,
             verbose=True
         )
 

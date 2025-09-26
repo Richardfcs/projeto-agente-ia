@@ -12,7 +12,7 @@ Flask-Cors
 pymongo[srv]
 
 # Autenticação (para as próximas seções)
-passlib[bcrypt]
+passlib[bcrypt]==1.7.4
 python-jose[cryptography]
 Flask-JWT-Extended
 
@@ -31,4 +31,4 @@ google-generativeai
 python-dotenv
 
 # Criptografia
-bcrypt
+bcrypt==3.2.0
