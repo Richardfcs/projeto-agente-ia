@@ -2,6 +2,7 @@
 
 # Arquivos de ambiente
 .env
+env
 
 # Diretórios de cache do Python
 __pycache__/
