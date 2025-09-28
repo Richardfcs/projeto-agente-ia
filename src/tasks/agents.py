@@ -1,7 +1,7 @@
 # Arquivo: /src/tasks/agents.py
 
 from crewai import Agent, LLM
-from src.tasks.tools import FileReaderTool, TemplateFillerTool, SimpleDocumentGeneratorTool, DatabaseQueryTool, TemplateInspectorTool
+from src.tasks.tools import FileReaderTool, TemplateFillerTool, SimpleDocumentGeneratorTool, DatabaseQueryTool, TemplateInspectorTool, TemplateListerTool 
 from src.config import Config
 
 # --- CONFIGURAÇÃO DO LLM ---
@@ -17,7 +17,8 @@ file_reader_tool = FileReaderTool()
 template_filler_tool = TemplateFillerTool()
 simple_doc_generator_tool = SimpleDocumentGeneratorTool()
 database_query_tool = DatabaseQueryTool()
-TemplateInspectorTool = TemplateInspectorTool()
+template_inspector_tool = TemplateInspectorTool()
+template_lister_tool = TemplateListerTool()
 
 
 # --- DEFINIÇÃO DOS AGENTES DA EQUIPE ---
@@ -75,6 +76,25 @@ agente_analista_de_conteudo = Agent(
         "e devolver tudo em um único JSON pronto para ser usado pela ferramenta de preenchimento."
     ),
     llm=llm,
-    tools=[TemplateInspectorTool], # Este agente apenas pensa e escreve.
+    tools=[template_inspector_tool], # Este agente apenas pensa e escreve.
+    verbose=True
+)
+
+agente_revisor_final = Agent(
+    role="Revisor Final e Especialista em Comunicação",
+    goal=(
+        "Analisar o resultado final de uma tarefa, que pode ser uma mensagem de sucesso ou uma mensagem de erro. "
+        "Formatar este resultado em uma resposta final, clara, amigável e útil para o usuário. "
+        "Se for um erro, explique o problema em termos simples e sugira soluções."
+    ),
+    backstory=(
+        "Você é a voz final do sistema. Sua especialidade é a comunicação. Você pega o resultado técnico "
+        "produzido pelos outros agentes e o transforma em uma resposta polida para o cliente. "
+        "Se a tarefa foi um sucesso, você parabeniza e informa o resultado. Se foi uma falha, você age como "
+        "um suporte técnico prestativo, usando suas ferramentas para diagnosticar e sugerir correções."
+    ),
+    llm=llm,
+    tools=[template_lister_tool], # Ele tem a ferramenta para listar templates em caso de erro.
+    allow_delegation=False,
     verbose=True
 )

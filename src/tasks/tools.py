@@ -217,3 +217,22 @@ class TemplateInspectorTool(BaseTool):
             return f"O template '{template_name}' espera as seguintes variáveis: {list(variaveis)}"
         except Exception as e:
             return f"Erro ao inspecionar o template: {e}"
+
+class TemplateListerTool(BaseTool):
+    name: str = "Listador de Templates Disponíveis"
+    description: str = "Use esta ferramenta para obter uma lista de todos os nomes de arquivos de templates disponíveis no sistema."
+
+    def _run(self) -> str:
+        """Busca e retorna os nomes de todos os templates no MongoDB."""
+        print("--- Ferramenta TemplateListerTool executada ---")
+        db = get_db()
+        try:
+            templates_cursor = db.templates.find({}, {"filename": 1, "_id": 0})
+            nomes_templates = [t['filename'] for t in templates_cursor]
+            
+            if not nomes_templates:
+                return "Nenhum template encontrado no sistema."
+            
+            return f"Os templates disponíveis são: {', '.join(nomes_templates)}"
+        except Exception as e:
+            return f"Erro ao listar os templates: {e}"

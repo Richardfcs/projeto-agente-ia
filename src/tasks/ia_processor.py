@@ -7,7 +7,7 @@ from bson import ObjectId
 from crewai import Crew, Process, Task
 from src.db.mongo import get_db
 # Importa todos os agentes que a Crew pode precisar
-from src.tasks.agents import agente_gerente, agente_especialista_documentos, agente_conversador, agente_analista_de_conteudo
+from src.tasks.agents import agente_gerente, agente_especialista_documentos, agente_conversador, agente_analista_de_conteudo, agente_revisor_final
 
 # Esta função principal é a única que precisa ser importada pelas rotas.
 def processar_solicitacao_ia(message_id: str) -> str:
@@ -78,9 +78,20 @@ def processar_solicitacao_ia(message_id: str) -> str:
             context=[tarefa_geracao_conteudo] # Depende da conclusão da geração de conteúdo
         )
 
+        tarefa_de_revisao = Task(
+            description=(
+                "Analise o resultado da tarefa anterior. Se for uma mensagem de sucesso, formate-a de forma amigável. "
+                "Se for uma mensagem de erro (ex: 'template não encontrado'), explique o problema para o usuário em "
+                "linguagem simples e use a ferramenta 'Listador de Templates Disponíveis' para sugerir alternativas."
+            ),
+            expected_output="A resposta final, formatada e amigável, para o usuário.",
+            agent=agente_revisor_final,
+            context=[tarefa_inspecao, tarefa_geracao_conteudo, tarefa_preenchimento]
+        )
+
         crew = Crew(
             agents=[agente_especialista_documentos, agente_analista_de_conteudo],
-            tasks=[tarefa_inspecao, tarefa_geracao_conteudo, tarefa_preenchimento],
+            tasks=[tarefa_inspecao, tarefa_geracao_conteudo, tarefa_preenchimento, tarefa_de_revisao],
             process=Process.sequential,
             verbose=True
         )
