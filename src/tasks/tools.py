@@ -10,6 +10,7 @@ from docxtpl import DocxTemplate
 from crewai.tools import BaseTool
 from src.db.mongo import get_db, get_gridfs
 from src.tasks.file_generators import criar_docx_stream, criar_xlsx_stream, criar_pdf_stream
+import re
 
 class FileReaderTool(BaseTool):
     name: str = "Leitor de Arquivos do Usuário"
@@ -174,3 +175,45 @@ class DatabaseQueryTool(BaseTool):
             return f"Metadados encontrados para o documento: {str(doc_meta)}"
         except Exception as e:
             return f"Erro ao consultar o banco de dados: {e}"
+
+class TemplateInspectorTool(BaseTool):
+    name: str = "Inspetor de Placeholders de Template"
+    description: str = "Use esta ferramenta para ler um arquivo de template .docx e extrair uma lista de todos os placeholders (variáveis Jinja2) que ele espera."
+
+    def _run(self, template_name: str) -> str:
+        """Abre um template do GridFS e extrai seus placeholders."""
+        print(f"--- Ferramenta TemplateInspectorTool executada para: {template_name} ---")
+        db = get_db()
+        fs = get_gridfs()
+
+        template_meta = db.templates.find_one({"filename": template_name})
+        if not template_meta:
+            return f"Erro: Template '{template_name}' não encontrado."
+
+        try:
+            gridfs_file = fs.get(template_meta["gridfs_file_id"])
+            # O XML de um .docx é complexo. Uma forma simples é ler o texto bruto.
+            # Uma abordagem mais robusta usaria uma biblioteca para parsear o XML.
+            from zipfile import ZipFile
+            import io
+
+            with ZipFile(io.BytesIO(gridfs_file.read())) as docx_zip:
+                xml_content = docx_zip.read('word/document.xml').decode('utf-8')
+
+            # Regex para encontrar todos os placeholders {{ variavel }} e {% for item in lista %}
+            placeholders = re.findall(r'\{\{.*?\}\}|\{%.*?%\}', xml_content)
+            
+            # Limpa e extrai os nomes das variáveis
+            variaveis = set()
+            for p in placeholders:
+                # Remove {{ }}, {% %}, | filtros, etc.
+                nome_limpo = re.sub(r'[\{\}\%\s]', '', p).split('|')[0].split('.')[0]
+                if nome_limpo not in ['if', 'for', 'in', 'endif', 'endfor']:
+                    variaveis.add(nome_limpo)
+
+            if not variaveis:
+                return "Nenhum placeholder encontrado no template."
+
+            return f"O template '{template_name}' espera as seguintes variáveis: {list(variaveis)}"
+        except Exception as e:
+            return f"Erro ao inspecionar o template: {e}"
