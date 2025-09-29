@@ -8,16 +8,27 @@ from bson.errors import InvalidId
 from docx import Document
 from docxtpl import DocxTemplate
 from crewai.tools import BaseTool
+from pydantic import BaseModel, Field
+from typing import Type
+
 from src.db.mongo import get_db, get_gridfs
 from src.tasks.file_generators import criar_docx_stream, criar_xlsx_stream, criar_pdf_stream
 import re
 
+# ==============================================================================
+# 1. ESQUEMA E FERRAMENTA: FileReaderTool
+# ==============================================================================
+class FileReaderInput(BaseModel):
+    """Esquema de input para a ferramenta Leitor de Arquivos."""
+    document_id: str = Field(description="O ID do metadado do documento a ser lido.")
+
 class FileReaderTool(BaseTool):
     name: str = "Leitor de Arquivos do Usuário"
     description: str = "Use esta ferramenta para ler o conteúdo de um arquivo DOCX ou XLSX que o usuário anexou. Você deve fornecer o ID do metado do documento (document_id) que está na conversa."
+    
+    args_schema: Type[BaseModel] = FileReaderInput
 
     def _run(self, document_id: str) -> str:
-        # ... (SEU CÓDIGO AQUI - SEM MUDANÇAS) ...
         print(f"--- Ferramenta FileReaderTool executada com document_id: {document_id} ---")
         db = get_db()
         fs = get_gridfs()
@@ -45,10 +56,21 @@ class FileReaderTool(BaseTool):
         except Exception as e:
             return f"Erro excepcional ao tentar ler o arquivo: {e}"
 
+# ==============================================================================
+# 2. ESQUEMA E FERRAMENTA: TemplateFillerTool (O MAIS IMPORTANTE)
+# ==============================================================================
+class TemplateFillerInput(BaseModel):
+    """Esquema de input para a ferramenta Preenchedor de Templates."""
+    template_name: str = Field(description="O nome exato do arquivo do template. Ex: 'proposta.docx'")
+    context: dict = Field(description="Um dicionário JSON com as chaves e valores para preencher o template.")
+    owner_id: str = Field(description="O ID do usuário que é o dono do novo documento.")
+    output_filename: str | None = Field(default=None, description="Opcional. O nome do arquivo a ser gerado.")
 
 class TemplateFillerTool(BaseTool):
     name: str = "Preenchedor de Templates de Documentos"
     description: str = "Use esta ferramenta para gerar um novo documento DOCX a partir de um template. Você precisa fornecer o nome do template, o ID do usuário (owner_id), um dicionário JSON com o contexto, e opcionalmente um nome para o arquivo de saída (output_filename)."
+    
+    args_schema: Type[BaseModel] = TemplateFillerInput
 
     def _run(self, template_name: str, context: dict, owner_id: str, output_filename: str = None) -> str:
         """
@@ -57,7 +79,6 @@ class TemplateFillerTool(BaseTool):
         """
         print(f"--- Ferramenta TemplateFillerTool executada para o template: {template_name} por owner: {owner_id} ---")
 
-        # Validação crucial dos parâmetros
         if not all([template_name, context, owner_id]):
             return "Erro: A ferramenta requer 'template_name', 'context', e 'owner_id'."
 
@@ -102,12 +123,22 @@ class TemplateFillerTool(BaseTool):
         except Exception as e:
             return f"Erro excepcional ao tentar preencher o template: {e}"
 
+# ==============================================================================
+# 3. ESQUEMA E FERRAMENTA: SimpleDocumentGeneratorTool
+# ==============================================================================
+class SimpleDocumentGeneratorInput(BaseModel):
+    """Esquema de input para a ferramenta Gerador de Documentos Simples."""
+    output_filename: str = Field(description="O nome do arquivo a ser criado, incluindo a extensão (.docx, .xlsx, ou .pdf).")
+    content: str = Field(description="O conteúdo de texto completo que será o corpo do documento.")
+    owner_id: str = Field(description="O ID do usuário que será o dono do novo documento.")
+
 class SimpleDocumentGeneratorTool(BaseTool):
     name: str = "Gerador de Documentos Simples"
     description: str = "Use esta ferramenta para criar um novo documento (DOCX, XLSX ou PDF) a partir de um bloco de texto. Você precisa fornecer o nome do arquivo de saída (output_filename), o conteúdo de texto (content) e o ID do usuário dono (owner_id)."
+    
+    args_schema: Type[BaseModel] = SimpleDocumentGeneratorInput
 
     def _run(self, output_filename: str, content: str, owner_id: str) -> str:
-        # ... (SEU CÓDIGO AQUI - SEM MUDANÇAS) ...
         print(f"--- Ferramenta SimpleDocumentGeneratorTool executada para criar: {output_filename} ---")
         
         if not all([output_filename, content, owner_id]):
@@ -154,13 +185,20 @@ class SimpleDocumentGeneratorTool(BaseTool):
         except Exception as e:
             return f"Erro excepcional ao tentar gerar o documento simples: {e}"
 
+# ==============================================================================
+# 4. ESQUEMA E FERRAMENTA: DatabaseQueryTool
+# ==============================================================================
+class DatabaseQueryInput(BaseModel):
+    """Esquema de input para a ferramenta de Consulta ao Banco de Dados."""
+    document_id: str = Field(description="O ID do metadado do documento a ser consultado.")
 
 class DatabaseQueryTool(BaseTool):
     name: str = "Consultor de Banco de Dados de Documentos"
     description: str = "Use esta ferramenta para consultar informações (metadados) sobre documentos que já foram criados. Você deve fornecer o ID do metadado do documento (document_id)."
+    
+    args_schema: Type[BaseModel] = DatabaseQueryInput
 
     def _run(self, document_id: str) -> str:
-        # ... (SEU CÓDIGO AQUI - SEM MUDANÇAS) ...
         print(f"--- Ferramenta DatabaseQueryTool executada para o document_id: {document_id} ---")
         db = get_db()
         try:
@@ -176,9 +214,18 @@ class DatabaseQueryTool(BaseTool):
         except Exception as e:
             return f"Erro ao consultar o banco de dados: {e}"
 
+# ==============================================================================
+# 5. ESQUEMA E FERRAMENTA: TemplateInspectorTool
+# ==============================================================================
+class TemplateInspectorInput(BaseModel):
+    """Esquema de input para a ferramenta Inspetor de Templates."""
+    template_name: str = Field(description="O nome exato do arquivo do template .docx a ser inspecionado.")
+
 class TemplateInspectorTool(BaseTool):
     name: str = "Inspetor de Placeholders de Template"
     description: str = "Use esta ferramenta para ler um arquivo de template .docx e extrair uma lista de todos os placeholders (variáveis Jinja2) que ele espera."
+    
+    args_schema: Type[BaseModel] = TemplateInspectorInput
 
     def _run(self, template_name: str) -> str:
         """Abre um template do GridFS e extrai seus placeholders."""
@@ -200,13 +247,10 @@ class TemplateInspectorTool(BaseTool):
             with ZipFile(io.BytesIO(gridfs_file.read())) as docx_zip:
                 xml_content = docx_zip.read('word/document.xml').decode('utf-8')
 
-            # Regex para encontrar todos os placeholders {{ variavel }} e {% for item in lista %}
             placeholders = re.findall(r'\{\{.*?\}\}|\{%.*?%\}', xml_content)
             
-            # Limpa e extrai os nomes das variáveis
             variaveis = set()
             for p in placeholders:
-                # Remove {{ }}, {% %}, | filtros, etc.
                 nome_limpo = re.sub(r'[\{\}\%\s]', '', p).split('|')[0].split('.')[0]
                 if nome_limpo not in ['if', 'for', 'in', 'endif', 'endfor']:
                     variaveis.add(nome_limpo)
@@ -218,6 +262,10 @@ class TemplateInspectorTool(BaseTool):
         except Exception as e:
             return f"Erro ao inspecionar o template: {e}"
 
+# ==============================================================================
+# 6. FERRAMENTA: TemplateListerTool (Sem alterações)
+# ==============================================================================
+# Esta ferramenta não precisa de um esquema Pydantic, pois não recebe argumentos.
 class TemplateListerTool(BaseTool):
     name: str = "Listador de Templates Disponíveis"
     description: str = "Use esta ferramenta para obter uma lista de todos os nomes de arquivos de templates disponíveis no sistema."

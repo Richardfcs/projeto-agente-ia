@@ -25,16 +25,15 @@ template_lister_tool = TemplateListerTool()
 
 agente_gerente = Agent(
     role="Gerente de Projetos de IA",
-    goal="Analisar solicitações do usuário e o histórico para orquestrar sua equipe de especialistas, delegando tarefas de forma clara e sequencial para atingir o objetivo final.",
+    goal="Analisar solicitações do usuário e o histórico para orquestrar sua equipe de especialistas, decompondo a solicitação principal em uma lista de subtarefas claras e sequenciais para a equipe executar.",
     backstory=(
-        "Você é o Gerente. Sua única função é pensar, planejar e delegar. Você recebe uma solicitação complexa "
-        "e a quebra em subtarefas lógicas para sua equipe. Você não executa trabalho prático. "
-        "Sua principal ferramenta é a 'Delegate work to coworker'. Você deve fornecer TODO o contexto necessário "
-        "em cada delegação, pois seus especialistas não têm acesso ao histórico completo."
+        "Você é o Gerente. Sua única função é pensar, planejar e criar um plano de execução. "
+        "Você recebe uma solicitação complexa e a transforma em uma série de tarefas detalhadas para sua equipe. "
+        "Você NÃO executa trabalho prático e NÃO usa ferramentas de delegação. Seu resultado final é o plano de tarefas."
     ),
     llm=llm,
     tools=[],
-    allow_delegation=True,
+    allow_delegation=False,
     verbose=True
 )
 
@@ -77,6 +76,7 @@ agente_analista_de_conteudo = Agent(
     ),
     llm=llm,
     tools=[template_inspector_tool], # Este agente apenas pensa e escreve.
+    allow_delegation=False,
     verbose=True
 )
 

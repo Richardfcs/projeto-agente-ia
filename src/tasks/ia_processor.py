@@ -39,61 +39,50 @@ def processar_solicitacao_ia(message_id: str) -> str:
             [f"{msg['role']}: {msg['content']}" for msg in historico_completo]
         )
 
-        # Tarefa 1: O Executor inspeciona o template para descobrir o que ele precisa.
-        tarefa_inspecao = Task(
+        tarefa_principal = Task(
             description=(
-                "Sua primeira tarefa é descobrir quais placeholders (variáveis) um template de documento espera. "
-                "Analise o histórico da conversa para encontrar o nome do template que o usuário mencionou. "
-                "Use a ferramenta 'Inspetor de Placeholders de Template' para extrair a lista de variáveis necessárias.\n\n"
-                f"Histórico para análise:\n{historico_texto}"
-            ),
-            expected_output="Uma lista de texto simples contendo os nomes das variáveis que o template precisa.",
-            agent=agente_especialista_documentos # O especialista que tem a ferramenta
-        )
+                "Você é o gerente de uma equipe de especialistas em IA. Sua missão é analisar a solicitação do usuário e o histórico da conversa para criar um plano de execução passo a passo. "
+                "Seu único trabalho é decompor a solicitação principal em uma lista de subtarefas para sua equipe. "
+                "Você deve identificar qual especialista é o mais adequado para cada subtarefa.\n\n"
 
-       # Tarefa 2: O Analista de Conteúdo gera o JSON com base na lista de placeholders.
-        tarefa_geracao_conteudo = Task(
-            description=(
-                "Sua tarefa é criativa. Você receberá uma lista de placeholders (o resultado da tarefa anterior) "
-                "e o histórico completo da conversa. Com base no pedido original do usuário, gere o conteúdo "
-                "para CADA placeholder da lista e monte um único dicionário JSON `context` com os resultados.\n\n"
-                f"Histórico para análise:\n{historico_texto}"
-            ),
-            expected_output="Um dicionário JSON completo (`context`) contendo todas as chaves e valores para preencher o template.",
-            agent=agente_analista_de_conteudo,
-            context=[tarefa_inspecao] # Depende da conclusão da inspeção
-        )
+                "**COMO CRIAR O PLANO DE TAREFAS:**\n"
+                "Para cada etapa do plano, você deve definir claramente:\n"
+                "- `description`: O que o especialista precisa fazer, com todo o contexto necessário.\n"
+                "- `expected_output`: Qual é o resultado esperado para essa etapa específica.\n"
 
-        # Tarefa 3: O Executor usa o JSON gerado para preencher o template.
-        tarefa_preenchimento = Task(
-            description=(
-                "Sua tarefa final é de execução. Você receberá um dicionário JSON `context` (o resultado da tarefa anterior). "
-                "Use a ferramenta 'Preenchedor de Templates de Documentos' para gerar o documento final. "
-                "Você precisará extrair o nome do template e inferir um nome de arquivo a partir do histórico da conversa.\n\n"
-                f"ID do usuário (owner_id) a ser usado: '{user_id}'\n"
-                f"Histórico para análise:\n{historico_texto}"
-            ),
-            expected_output="A mensagem de sucesso da ferramenta 'Preenchedor de Templates de Documentos', incluindo o ID do novo documento.",
-            agent=agente_especialista_documentos,
-            context=[tarefa_geracao_conteudo] # Depende da conclusão da geração de conteúdo
-        )
+                "**LÓGICA DE FINALIZAÇÃO DA TAREFA:**\n"
+                "1. **SE o objetivo é CRIAR UM DOCUMENTO** (usando um template ou gerando um novo arquivo):\n"
+                "   - O plano deve ter pelo menos duas etapas: uma para o `Analista de Conteúdo` gerar o JSON, e a etapa final para o `Especialista em Documentos` preencher o template.\n"
+                "   - A `expected_output` da última tarefa do `Especialista em Documentos` deve ser a mensagem de sucesso com o ID do documento.\n"
+                "2. **SE o objetivo é uma PERGUNTA ou CONVERSA:**\n"
+                "   - O plano deve ter uma única tarefa para o `Especialista em Conversação`, e o resultado será a resposta dele.\n"
+                "3. **SE ocorrer um ERRO:**\n"
+                "   - O plano deve delegar a mensagem de erro para o `Revisor Final` para que ele formule uma resposta amigável.\n\n"
 
-        tarefa_de_revisao = Task(
-            description=(
-                "Analise o resultado da tarefa anterior. Se for uma mensagem de sucesso, formate-a de forma amigável. "
-                "Se for uma mensagem de erro (ex: 'template não encontrado'), explique o problema para o usuário em "
-                "linguagem simples e use a ferramenta 'Listador de Templates Disponíveis' para sugerir alternativas."
+                "**Sua Equipe de Especialistas (para atribuir as tarefas):**\n"
+                "- `Especialista em Documentos`\n"
+                "- `Analista de Conteúdo e Estrutura`\n"
+                "- `Especialista em Conversação`\n"
+                "- `Revisor Final e Especialista em Comunicação`\n\n"
+
+                f"**INFORMAÇÕES CRÍTICAS PARA O PLANO:**\n"
+                f"- ID do usuário (owner_id): '{user_id}'\n"
+                f"- ID do documento anexado pelo usuário: '{input_doc_id}'\n\n"
+
+                f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}"
             ),
-            expected_output="A resposta final, formatada e amigável, para o usuário.",
-            agent=agente_revisor_final,
-            context=[tarefa_inspecao, tarefa_geracao_conteudo, tarefa_preenchimento]
+            expected_output=(
+                "Uma lista de tarefas detalhadas e prontas para serem executadas pela equipe, seguindo a lógica de finalização."
+            ),
+            agent=agente_gerente
         )
 
         crew = Crew(
-            agents=[agente_especialista_documentos, agente_analista_de_conteudo],
-            tasks=[tarefa_inspecao, tarefa_geracao_conteudo, tarefa_preenchimento, tarefa_de_revisao],
-            process=Process.sequential,
-            verbose=True
+            agents=[agente_especialista_documentos, agente_analista_de_conteudo, agente_conversador, agente_revisor_final],
+            tasks=[tarefa_principal],
+            process=Process.hierarchical,
+            manager_llm=agente_gerente.llm,
+            verbose=True,
         )
 
         resultado_crew = crew.kickoff()

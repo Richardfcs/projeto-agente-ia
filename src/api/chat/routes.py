@@ -148,28 +148,54 @@ def get_conversation_history(conversation_id_str):
 @chat_bp.route('/conversations/<string:conversation_id>', methods=['DELETE'])
 @jwt_required()
 def delete_conversation(conversation_id):
-    """Exclui uma conversa inteira e todas as suas mensagens associadas."""
+    """Exclui uma conversa inteira e todas as suas mensagens e arquivos associados."""
     current_user_id = get_jwt_identity()
     db = get_db()
+    fs = get_gridfs()
+    conv_oid = ObjectId(conversation_id)
 
-    try:
-        conv_oid = ObjectId(conversation_id)
-    except InvalidId:
-        return jsonify({"erro": "ID de conversa inválido"}), 400
-
-    # 1. Encontrar e excluir a conversa, verificando se pertence ao usuário
-    delete_result = db.conversations.delete_one({
+    # 1. Verificar se a conversa pertence ao usuário antes de fazer qualquer coisa
+    conversation_to_delete = db.conversations.find_one({
         "_id": conv_oid,
         "user_id": ObjectId(current_user_id)
     })
-
-    if delete_result.deleted_count == 0:
+    if not conversation_to_delete:
         return jsonify({"erro": "Conversa não encontrada ou acesso negado"}), 404
 
-    # 2. Excluir todas as mensagens associadas a essa conversa
-    db.messages.delete_many({"conversation_id": conv_oid})
+    # --- NOVA LÓGICA DE LIMPEZA DE ARQUIVOS ---
+    # 2. Encontrar todos os documentos associados a esta conversa
+    messages_in_conv = db.messages.find({"conversation_id": conv_oid})
+    document_ids_to_delete = []
+    for msg in messages_in_conv:
+        if msg.get("generated_document_id"):
+            document_ids_to_delete.append(msg.get("generated_document_id"))
+        # Opcional: decidir se quer excluir também os arquivos que o usuário enviou
+        if msg.get("input_document_id"):
+            document_ids_to_delete.append(msg.get("input_document_id"))
+    
+    # 3. Excluir os documentos encontrados
+    if document_ids_to_delete:
+        # Pega apenas os IDs únicos para evitar tentar deletar o mesmo arquivo duas vezes
+        unique_doc_ids = list(set(document_ids_to_delete))
+        
+        # Encontra os gridfs_file_ids antes de deletar os metadados
+        docs_meta = db.documents.find({"_id": {"$in": unique_doc_ids}})
+        gridfs_ids_to_delete = [doc.get("gridfs_file_id") for doc in docs_meta]
+        
+        # Deleta os metadados
+        db.documents.delete_many({"_id": {"$in": unique_doc_ids}})
+        
+        # Deleta os arquivos no GridFS
+        for gridfs_id in gridfs_ids_to_delete:
+            if gridfs_id:
+                fs.delete(gridfs_id)
+    # --- FIM DA NOVA LÓGICA ---
 
-    return jsonify({"mensagem": "Conversa e todas as suas mensagens foram excluídas com sucesso."}), 200
+    # 4. Excluir a conversa e as mensagens (como antes)
+    db.messages.delete_many({"conversation_id": conv_oid})
+    db.conversations.delete_one({"_id": conv_oid})
+
+    return jsonify({"mensagem": "Conversa e todos os dados associados foram excluídos."}), 200
 
 @chat_bp.route('/messages/<string:message_id>', methods=['DELETE'])
 @jwt_required()
