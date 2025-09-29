@@ -32,3 +32,6 @@ python-dotenv
 
 # Criptografia
 bcrypt==3.2.0
+
+# Swagger
+flask-swagger-ui

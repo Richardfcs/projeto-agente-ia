@@ -5,6 +5,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from src.config import Config
 from src.db.mongo import init_db
+from flask_swagger_ui import get_swaggerui_blueprint
 
 def create_app():
     """Cria e configura a instância da aplicação Flask."""
@@ -17,6 +18,22 @@ def create_app():
     
     with app.app_context():
         init_db(app)
+
+    # URL onde a sua especificação (o arquivo .yaml) estará disponível
+    SWAGGER_URL = '/api/docs'
+    API_URL = '/static/openapi.yaml'
+
+    # Cria o Blueprint da Swagger UI
+    swaggerui_blueprint = get_swaggerui_blueprint(
+        SWAGGER_URL,
+        API_URL,
+        config={
+            'app_name': "Agente de IA - API Docs"
+        }
+    )
+
+    # Registra o Blueprint da Swagger
+    app.register_blueprint(swaggerui_blueprint)
 
     # Registra os Blueprints
     from src.api.chat.routes import chat_bp
