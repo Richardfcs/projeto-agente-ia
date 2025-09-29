@@ -7,6 +7,8 @@ info:
   version: 1.0.0
 
 servers:
+  - url: https://agente-ia-squad42.onrender.com
+    description: Servidor de Produção no Render
   - url: http://127.0.0.1:5000
     description: Servidor de desenvolvimento local
 
@@ -44,7 +46,13 @@ paths:
         content:
           application/json:
             schema: {type: object, properties: {username: {type: string}, password: {type: string, format: password}}}
-      responses: {'201': {description: Usuário registrado}, '400': {description: Dados inválidos}, '409': {description: Usuário já existe}}
+      responses:
+        '201':
+          description: Usuário registrado com sucesso.
+        '400':
+          description: Dados de entrada inválidos.
+        '409':
+          description: Nome de usuário já existe.
 
   /api/auth/login:
     post:
@@ -56,13 +64,21 @@ paths:
         content:
           application/json:
             schema: {type: object, properties: {username: {type: string}, password: {type: string, format: password}}}
-      responses: {'200': {description: Login bem-sucedido, retorna token}, '401': {description: Credenciais inválidas}}
+      responses:
+        '200':
+          description: Login bem-sucedido. Retorna o token de acesso.
+        '401':
+          description: Credenciais inválidas.
   
   /api/auth/profile:
     get:
       tags: [Authentication]
       summary: Obter informações do perfil do usuário logado
-      responses: {'200': {description: Perfil do usuário}, '401': {description: Não autorizado}}
+      responses:
+        '200':
+          description: Perfil do usuário.
+        '401':
+          description: Não autorizado.
 
   # ===================================================================
   # Conversations & Chat
@@ -76,23 +92,45 @@ paths:
         content:
           application/json:
             schema: {type: object, properties: {prompt: {type: string}, conversation_id: {type: string}, input_document_id: {type: string}}}
-      responses: {'201': {description: Solicitação processada}, '400': {description: Prompt ausente}, '401': {description: Não autorizado}}
+      responses:
+        '201':
+          description: Solicitação processada com sucesso.
+        '400':
+          description: Prompt ausente.
+        '401':
+          description: Não autorizado.
     get:
       tags: [Conversations & Chat]
       summary: Listar todas as conversas do usuário
-      responses: {'200': {description: Lista de conversas}, '401': {description: Não autorizado}}
+      responses:
+        '200':
+          description: Uma lista de conversas.
+        '401':
+          description: Não autorizado.
   
   /api/chat/conversations/{conversation_id}:
     get:
       tags: [Conversations & Chat]
       summary: Obter o histórico de uma conversa
       parameters: [{name: conversation_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Lista de mensagens}, '401': {description: Não autorizado}, '404': {description: Conversa não encontrada}}
+      responses:
+        '200':
+          description: Uma lista de mensagens da conversa.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Conversa não encontrada.
     delete:
       tags: [Conversations & Chat]
       summary: Excluir uma conversa inteira
       parameters: [{name: conversation_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Conversa excluída}, '401': {description: Não autorizado}, '404': {description: Conversa não encontrada}}
+      responses:
+        '200':
+          description: Conversa excluída com sucesso.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Conversa não encontrada.
       
   /api/chat/conversations/{conversation_id}/rename:
     put:
@@ -104,35 +142,57 @@ paths:
         content:
           application/json:
             schema: {type: object, properties: {new_title: {type: string}}}
-      responses: {'200': {description: Conversa renomeada}, '401': {description: Não autorizado}, '404': {description: Conversa não encontrada}}
+      responses:
+        '200':
+          description: Conversa renomeada com sucesso.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Conversa não encontrada.
 
   /api/chat/messages/{message_id}/edit:
     put:
       tags: [Conversations & Chat]
       summary: Editar uma mensagem de usuário
-      description: Edita uma mensagem e refaz a conversa a partir daquele ponto.
       parameters: [{name: message_id, in: path, required: true, schema: {type: string}}]
       requestBody:
         required: true
         content:
           application/json:
             schema: {type: object, properties: {new_content: {type: string}}}
-      responses: {'200': {description: Mensagem editada, reprocessando}, '401': {description: Não autorizado}, '404': {description: Mensagem não encontrada}}
+      responses:
+        '200':
+          description: Mensagem editada e conversa reprocessada.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Mensagem não encontrada.
       
   /api/chat/messages/{message_id}:
     delete:
       tags: [Conversations & Chat]
       summary: Excluir uma única mensagem
       parameters: [{name: message_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Mensagem excluída}, '401': {description: Não autorizado}, '404': {description: Mensagem não encontrada}}
+      responses:
+        '200':
+          description: Mensagem excluída com sucesso.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Mensagem não encontrada.
 
   /api/chat/messages/{message_id}/regenerate:
     post:
       tags: [Conversations & Chat]
       summary: Regenerar a resposta da IA
-      description: Refaz a resposta da IA para um prompt de usuário existente.
       parameters: [{name: message_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Regeneração iniciada}, '401': {description: Não autorizado}, '404': {description: Mensagem não encontrada}}
+      responses:
+        '200':
+          description: Regeneração da resposta iniciada.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Mensagem não encontrada.
 
   # ===================================================================
   # Documents & Files
@@ -146,27 +206,45 @@ paths:
         content:
           multipart/form-data:
             schema: {type: object, properties: {file: {type: string, format: binary}}}
-      responses: {'201': {description: Arquivo enviado}, '401': {description: Não autorizado}}
+      responses:
+        '201':
+          description: Arquivo enviado com sucesso.
+        '401':
+          description: Não autorizado.
       
   /api/documents:
     get:
       tags: [Documents & Files]
       summary: Listar documentos do usuário
-      responses: {'200': {description: Lista de metadados}, '401': {description: Não autorizado}}
+      responses:
+        '200':
+          description: Lista de metadados dos documentos.
+        '401':
+          description: Não autorizado.
   
   /api/documents/search:
     get:
       tags: [Documents & Files]
       summary: Buscar documentos por nome
       parameters: [{name: q, in: query, required: true, schema: {type: string}}]
-      responses: {'200': {description: Resultado da busca}, '401': {description: Não autorizado}}
+      responses:
+        '200':
+          description: Resultado da busca de documentos.
+        '401':
+          description: Não autorizado.
 
   /api/files/{gridfs_file_id}:
     get:
       tags: [Documents & Files]
       summary: Fazer download de um arquivo
       parameters: [{name: gridfs_file_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Download do arquivo}, '401': {description: Não autorizado}, '404': {description: Arquivo não encontrado}}
+      responses:
+        '200':
+          description: Download do arquivo.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Arquivo não encontrado.
       
   /api/documents/{document_id}/rename:
     put:
@@ -178,14 +256,26 @@ paths:
         content:
           application/json:
             schema: {type: object, properties: {new_filename: {type: string}}}
-      responses: {'200': {description: Documento renomeado}, '401': {description: Não autorizado}, '404': {description: Documento não encontrado}}
+      responses:
+        '200':
+          description: Documento renomeado com sucesso.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Documento não encontrado.
           
   /api/documents/{document_id}:
     delete:
       tags: [Documents & Files]
       summary: Excluir um documento
       parameters: [{name: document_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: Documento excluído}, '401': {description: Não autorizado}, '404': {description: Documento não encontrado}}
+      responses:
+        '200':
+          description: Documento excluído com sucesso.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Documento não encontrado.
           
   # ===================================================================
   # Templates
@@ -199,10 +289,18 @@ paths:
         content:
           multipart/form-data:
             schema: {type: object, properties: {file: {type: string, format: binary}}}
-      responses: {'201': {description: Template enviado}, '401': {description: Não autorizado}}
+      responses:
+        '201':
+          description: Template enviado com sucesso.
+        '401':
+          description: Não autorizado.
 
   /api/templates:
     get:
       tags: [Templates]
       summary: Listar todos os templates disponíveis
-      responses: {'200': {description: Lista de metadados}, '401': {description: Não autorizado}}
+      responses:
+        '200':
+          description: Lista de metadados de templates.
+        '401':
+          description: Não autorizado.
