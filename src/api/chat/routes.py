@@ -144,3 +144,130 @@ def get_conversation_history(conversation_id_str):
         messages.append(msg)
         
     return jsonify(messages)
+
+@chat_bp.route('/conversations/<string:conversation_id>', methods=['DELETE'])
+@jwt_required()
+def delete_conversation(conversation_id):
+    """Exclui uma conversa inteira e todas as suas mensagens associadas."""
+    current_user_id = get_jwt_identity()
+    db = get_db()
+
+    try:
+        conv_oid = ObjectId(conversation_id)
+    except InvalidId:
+        return jsonify({"erro": "ID de conversa inválido"}), 400
+
+    # 1. Encontrar e excluir a conversa, verificando se pertence ao usuário
+    delete_result = db.conversations.delete_one({
+        "_id": conv_oid,
+        "user_id": ObjectId(current_user_id)
+    })
+
+    if delete_result.deleted_count == 0:
+        return jsonify({"erro": "Conversa não encontrada ou acesso negado"}), 404
+
+    # 2. Excluir todas as mensagens associadas a essa conversa
+    db.messages.delete_many({"conversation_id": conv_oid})
+
+    return jsonify({"mensagem": "Conversa e todas as suas mensagens foram excluídas com sucesso."}), 200
+
+@chat_bp.route('/messages/<string:message_id>', methods=['DELETE'])
+@jwt_required()
+def delete_message(message_id):
+    """Exclui uma única mensagem de uma conversa."""
+    current_user_id = get_jwt_identity()
+    db = get_db()
+
+    try:
+        msg_oid = ObjectId(message_id)
+    except InvalidId:
+        return jsonify({"erro": "ID de mensagem inválido"}), 400
+
+    # Encontra e exclui a mensagem, garantindo que ela pertença ao usuário logado
+    # Esta é uma verificação de segurança importante
+    delete_result = db.messages.delete_one({
+        "_id": msg_oid,
+        "user_id": ObjectId(current_user_id)
+    })
+
+    if delete_result.deleted_count == 0:
+        return jsonify({"erro": "Mensagem não encontrada ou acesso negado"}), 404
+
+    return jsonify({"mensagem": "Mensagem excluída com sucesso."}), 200
+
+@chat_bp.route('/conversations/<string:conversation_id>/rename', methods=['PUT'])
+@jwt_required()
+def rename_conversation(conversation_id):
+    """Renomeia o título de uma conversa."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    new_title = data.get("new_title")
+
+    if not new_title:
+        return jsonify({"erro": "O campo 'new_title' é obrigatório"}), 400
+    
+    db = get_db()
+    result = db.conversations.update_one(
+        {"_id": ObjectId(conversation_id), "user_id": ObjectId(current_user_id)},
+        {"$set": {"title": new_title, "last_updated_at": datetime.utcnow()}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"erro": "Conversa não encontrada ou acesso negado"}), 404
+        
+    return jsonify({"mensagem": "Conversa renomeada com sucesso."})
+
+@chat_bp.route('/messages/<string:message_id>/edit', methods=['PUT'])
+@jwt_required()
+def edit_message(message_id):
+    """Edita o conteúdo de uma mensagem de usuário e refaz a conversa a partir dali."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    new_content = data.get("new_content")
+
+    if not new_content:
+        return jsonify({"erro": "O campo 'new_content' é obrigatório"}), 400
+
+    db = get_db()
+    msg_oid = ObjectId(message_id)
+
+    # 1. Encontrar a mensagem original para garantir a permissão
+    original_message = db.messages.find_one({"_id": msg_oid, "user_id": ObjectId(current_user_id)})
+    if not original_message or original_message.get("role") != "user":
+        return jsonify({"erro": "Mensagem não encontrada, não pertence ao usuário ou não é um prompt de usuário."}), 404
+    
+    # 2. Excluir todas as mensagens que vieram DEPOIS desta
+    db.messages.delete_many({
+        "conversation_id": original_message["conversation_id"],
+        "timestamp": {"$gt": original_message["timestamp"]}
+    })
+
+    # 3. Atualizar a mensagem atual
+    db.messages.update_one({"_id": msg_oid}, {"$set": {"content": new_content}})
+
+    # 4. Acionar a IA novamente com o ID desta mensagem atualizada
+    processar_solicitacao_ia(message_id)
+
+    return jsonify({"mensagem": "Mensagem editada. A conversa está sendo reprocessada."}), 200
+
+@chat_bp.route('/messages/<string:message_id>/regenerate', methods=['POST'])
+@jwt_required()
+def regenerate_message(message_id):
+    """Refaz a resposta da IA para uma mensagem de usuário."""
+    # A lógica é muito similar à de edição, mas sem mudar o conteúdo
+    current_user_id = get_jwt_identity()
+    db = get_db()
+    msg_oid = ObjectId(message_id)
+
+    original_message = db.messages.find_one({"_id": msg_oid, "user_id": ObjectId(current_user_id)})
+    if not original_message or original_message.get("role") != "user":
+        return jsonify({"erro": "Mensagem não encontrada, não pertence ao usuário ou não é um prompt de usuário."}), 404
+
+    db.messages.delete_many({
+        "conversation_id": original_message["conversation_id"],
+        "timestamp": {"$gt": original_message["timestamp"]}
+    })
+    
+    processar_solicitacao_ia(message_id)
+    
+    return jsonify({"mensagem": "A resposta está sendo regenerada."}), 200
