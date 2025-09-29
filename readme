@@ -1,248 +1,120 @@
 # Projeto Agente de IA - Backend
 
-Este é o repositório do backend para o projeto Agente de IA. A aplicação é construída com Flask e utiliza o MongoDB como banco de dados, Celery para processamento assíncrono e a API do Google Gemini para as funcionalidades de inteligência artificial.
+Bem-vindo ao backend do projeto Agente de IA! Esta aplicação, construída com **Flask**, serve como o cérebro para um assistente de IA avançado. Ela utiliza **MongoDB** para um armazenamento de dados flexível, **GridFS** para lidar com arquivos grandes e o **CrewAI** para orquestrar uma equipe de agentes inteligentes alimentados pela API do **Google Gemini**.
 
-## Pré-requisitos
+O sistema é capaz de manter conversas contextuais, interagir com documentos (`.docx`, `.xlsx`), preencher templates complexos e gerenciar todos os dados do usuário de forma segura.
 
-Antes de começar, garanta que você tenha os seguintes softwares instalados em sua máquina:
+## ✨ Arquitetura e Funcionalidades
 
-- **Python** (versão 3.10 ou superior)
-- **Pip** (gerenciador de pacotes do Python)
-- **Git** (para clonar o repositório)
-- **MongoDB** (uma instância local ou uma conta no [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) para obter a string de conexão)
-- **Redis** (necessário para o Celery. A forma mais fácil de instalar localmente é via [Docker](https://www.docker.com/))
+-   **API RESTful Completa:** Endpoints para autenticação, gerenciamento de conversas, upload/download de arquivos e muito mais.
+-   **Autenticação Segura:** Sistema de registro e login com senhas criptografadas e autenticação baseada em **JWT (JSON Web Tokens)**.
+-   **Arquitetura de Agentes (CrewAI):**
+    -   **Gerente de Projetos:** Um agente de alto nível que analisa as solicitações do usuário.
+    -   **Especialistas:** Agentes focados em tarefas específicas, como manipular documentos, responder perguntas ou lidar com erros.
+    -   **Ferramentas Inteligentes:** Os agentes utilizam ferramentas personalizadas para interagir com o banco de dados e gerar documentos dinamicamente.
+-   **Armazenamento Escalável:** Uso do **MongoDB Atlas** e **GridFS** para garantir performance e capacidade de armazenamento para um grande volume de dados e arquivos.
+-   **Documentação Interativa:** Uma interface **Swagger UI** integrada para fácil exploração e teste de todos os endpoints da API.
 
-## ⚙️ Instalação e Configuração
+## 📋 Pré-requisitos
 
-Siga os passos abaixo para configurar o ambiente de desenvolvimento local.
+Antes de começar, garanta que você tenha os seguintes softwares instalados:
+
+-   **Python** (versão 3.10 ou superior)
+-   **Pip** e **Venv** (geralmente inclusos no Python)
+-   **Git** (para clonar o repositório)
+-   Uma conta no [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) para obter a string de conexão de um cluster gratuito (M0).
+
+## ⚙️ Instalação e Configuração Local
+
+Siga os passos abaixo para ter o ambiente de desenvolvimento rodando em sua máquina.
 
 ### 1. Clonar o Repositório
-
-Abra seu terminal e clone o projeto:
 
 ```bash
 git clone https://sua-url-do-repositorio.git
 cd projeto-agente-ia
 ```
-2. Criar e Ativar o Ambiente Virtual
 
-É uma boa prática isolar as dependências do projeto em um ambiente virtual.
+### 2. Criar e Ativar o Ambiente Virtual
 
-Para macOS / Linux:
+É uma boa prática isolar as dependências do projeto.
+
+**Para macOS / Linux:**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 ```
-Para Windows:
+**Para Windows:**
 ```bash
 python -m venv venv
 .\venv\Scripts\activate
 ```
 
-3. Instalar as Dependências
+### 3. Instalar as Dependências
 
-Com o ambiente virtual ativado, instale todas as bibliotecas necessárias com um único comando:
+Com o ambiente virtual ativado (`(venv)` aparecerá no seu terminal), instale todas as bibliotecas necessárias:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Configurar as Variáveis de Ambiente
+### 4. Configurar as Variáveis de Ambiente
 
-Este é o passo mais importante. As chaves de API e outras configurações sensíveis são gerenciadas através de um arquivo .env.
+Este é o passo mais importante. As chaves de API e outras configurações são gerenciadas através de um arquivo `.env`.
 
-a. Crie um arquivo chamado .env na raiz do projeto.
+a. **Crie um arquivo chamado `.env`** na raiz do projeto.
 
-b. Copie o conteúdo abaixo para dentro do seu arquivo .env e preencha com suas próprias chaves e configurações:
+b. Copie o conteúdo abaixo para dentro do seu arquivo `.env` e **preencha com suas próprias chaves e configurações**:
 
+```
 # Arquivo: .env
-# Preencha com suas próprias chaves e configurações
-```python
+
 # Configuração da Aplicação Flask
 FLASK_ENV=development
-SECRET_KEY='coloque-aqui-uma-chave-secreta-bem-longa-e-aleatoria'
+SECRET_KEY='gere-uma-chave-secreta-forte-aqui'
 
 # Conexão com o Banco de Dados MongoDB
-MONGO_URI='sua-string-de-conexao-do-mongodb-aqui'
-
-# Conexão com o Broker de Mensagens para Celery
-REDIS_URL='redis://localhost:6379/0'
+# IMPORTANTE: Substitua <password> pela sua senha e adicione o nome do DB antes do '?'
+MONGO_URI='mongodb+srv://<username>:<password>@seu-cluster.mongodb.net/agente_ia_db?retryWrites=true&w=majority'
+MONGO_DB_NAME='agente_ia_db'
 
 # Chave da API do Google Gemini
 GOOGLE_API_KEY='sua-chave-da-api-do-google-aqui'
+GEMINI_API_KEY='a-mesma-chave-acima'
 ```
 
-🚨 IMPORTANTE: O arquivo .env contém informações sensíveis. Ele já está incluído no .gitignore e NUNCA deve ser enviado para o repositório no GitHub.
+🚨 **IMPORTANTE:** O arquivo `.env` contém informações sensíveis. Ele já está no `.gitignore` e **NUNCA** deve ser enviado para o repositório no GitHub.
 
-▶️ Executando a Aplicação
+## ▶️ Executando a Aplicação
 
-Para rodar o projeto, você precisará de dois terminais abertos, ambos com o ambiente virtual ativado.
+Com a configuração concluída, iniciar o servidor é muito simples.
 
-1. Iniciar o Servidor Flask
-
-No primeiro terminal, inicie a aplicação web:
+No seu terminal (com o `venv` ativado), execute:
 
 ```bash
 python run.py
 ```
 
-O servidor estará disponível em http://127.0.0.1:5000. Você pode testar se ele está funcionando acessando http://127.0.0.1:5000/health no seu navegador.
+O servidor estará rodando e acessível em `http://127.0.0.1:5000`.
 
-2. Iniciar o Worker do Celery
+## 📚 Documentação da API (Swagger UI)
 
-As tarefas de IA são processadas em segundo plano. Para isso, precisamos de um "worker" do Celery escutando por novas tarefas.
+Uma vez que o servidor esteja rodando, você pode acessar a documentação interativa da API no seu navegador.
 
-No segundo terminal, execute o seguinte comando:
+**URL da Documentação:** **`http://127.0.0.1:5000/api/docs`**
 
-# NOTA: Este comando será finalizado quando a estrutura do Celery for implementada
-```bash
-celery -A sua_instancia_celery_aqui worker --loglevel=info
-```
+Nesta página, você pode:
+-   Visualizar todos os endpoints disponíveis.
+-   Ver os detalhes de cada rota (parâmetros, corpo da requisição, respostas).
+-   **Testar a API diretamente do navegador** usando a funcionalidade "Try it out".
 
-(Nota: O comando exato do Celery será definido quando a Seção 4 for implementada, mas a estrutura será essa.)
+## ✅ Testando a Aplicação
 
-```
-📂 Estrutura do Projeto
-/projeto-agente-ia/
-├── .env                  # Armazena as variáveis de ambiente (secreto)
-├── requirements.txt      # Lista de dependências Python
-├── run.py                # Ponto de entrada para iniciar a aplicação
-└── /src/
-    ├── __init__.py         # Application Factory (cria a app Flask)
-    ├── config.py           # Carrega as configurações do .env
-    ├── /api/               # Módulos de endpoints (Blueprints)
-    ├── /db/                # Lógica de conexão com o banco de dados
-    └── /tasks/             # Tarefas assíncronas para o Celery (IA, etc.)
-```
-
-# Projeto Agente de IA - Checklist de Desenvolvimento (Backend)
-
-Este documento rastreia o progresso do desenvolvimento do backend. Marque as caixas conforme as tarefas forem concluídas.
+Para testar o fluxo completo:
+1.  Use a rota `POST /api/auth/register` para criar um usuário.
+2.  Use a rota `POST /api/auth/login` para obter um `access_token`.
+3.  Clique no botão **"Authorize"** no topo da página do Swagger e cole seu token no formato `Bearer <seu_token>`.
+4.  Agora você pode testar os endpoints protegidos, como o `POST /api/chat/conversations`.
 
 ---
-
-### Seção 1: Fundação do Projeto (Setup Inicial)
-
-**Objetivo:** Criar um esqueleto de aplicação Flask funcional, organizado e pronto para escalar.
-
-- [x] **1.1. Estrutura de Pastas:** Estrutura base com `src`, `api`, `db`, `tasks` está criada.
-- [x] **1.2. Gerenciamento de Dependências:** Arquivo `requirements.txt` foi atualizado para remover Celery/Redis e usar Flask.
-- [x] **1.3. Configuração de Ambiente:** Arquivo `.env` foi criado e o `.gitignore` está configurado para ignorá-lo.
-- [x] **1.4. Application Factory:** A função `create_app` em `src/__init__.py` monta a aplicação Flask corretamente, sem a configuração do Celery.
-- [x] **1.5. Conexão com Banco de Dados:** A aplicação conecta-se com sucesso ao MongoDB na inicialização.
-- [x] **1.6. Validação do Setup:** O endpoint `GET /health` está funcionando e retorna uma mensagem de sucesso.
-
----
-
-### Seção 2: Módulo de Autenticação e Usuários
-
-**Objetivo:** Implementar um sistema seguro de registro e login usando JWT.
-
-- [x] **2.1. Modelo de Dados:** A coleção `users` está sendo utilizada para armazenar `username` e `hashed_password`.
-- [x] **2.2. Funções de Criptografia:** Funções para criar e verificar hashes de senha com `passlib` estão implementadas.
-- [x] **2.3. Endpoint de Registro (`POST /api/auth/register`):**
-    - [x] Recebe `username` e `password`.
-    - [x] Verifica se o usuário já existe.
-    - [x] Salva o novo usuário com a senha criptografada.
-    - [x] Retorna status `201 Created` em caso de sucesso.
-- [x] **2.4. Endpoint de Login (`POST /api/auth/login`):**
-    - [x] Recebe `username` e `password`.
-    - [x] Valida as credenciais contra os dados no banco.
-    - [x] Gera e retorna um `access_token` JWT em caso de sucesso.
-- [x] **2.5. Endpoint de Perfil (`GET /api/auth/profile`):**
-    - [x] A rota está protegida e requer um token JWT válido.
-    - [x] Extrai a identidade do usuário a partir do token.
-    - [x] Retorna os dados do usuário logado (sem a senha).
-
----
-
-### Seção 3: Gerenciamento de Arquivos com GridFS
-
-**Objetivo:** Criar endpoints para upload e download de arquivos grandes.
-
-- [x] **3.1. Modelos de Dados:** As coleções `templates` e `documents` são utilizadas para armazenar os metadados dos arquivos.
-- [x] **3.2. Endpoint de Upload de Template (`POST /api/templates/upload`):** Rota implementada e funcional.
-- [x] **3.3. Endpoint de Upload de Documento (`POST /api/documents/upload`):** Rota implementada e funcional.
-- [x] **3.4. Endpoint de Download (`GET /api/files/<gridfs_file_id>`):**
-    - [x] A rota está protegida.
-    - [x] Verifica a permissão do usuário para acessar o arquivo.
-    - [x] Busca o arquivo no GridFS e o retorna para download.
-
----
-
-### Seção 4: Módulo Conversacional com Arquitetura CrewAI
-
-**Objetivo:** Orquestrar uma equipe de agentes de IA para processar solicitações de forma modular e robusta.
-
-- [x] **4.1. Definição das Ferramentas (`tools.py`):**
-    - [x] Ferramenta `FileReaderTool` para ler arquivos do GridFS está criada.
-    - [x] Ferramenta `TemplateFillerTool` para preencher templates está criada.
-- [x] **4.2. Definição dos Agentes (`agents.py`):**
-    - [x] `agente_roteador` (analista/planejador) está definido.
-    - [x] `agente_executor_de_arquivos` (especialista em ferramentas) está definido.
-- [x] **4.3. Orquestração da Crew (`ia_processor.py`):**
-    - [x] A função `processar_solicitacao_ia` foi refatorada para montar e executar uma `Crew`.
-    - [x] As tarefas (`Task`) para análise e execução estão definidas.
-- [x] **4.4. Validação do Fluxo de Decisão:**
-    - [x] Testar se o `agente_roteador` consegue interpretar um prompt e delegar a tarefa correta.
-    - [x] Testar se o `agente_executor` consegue usar a `FileReaderTool` com sucesso.
-    - [x] Testar se o `agente_executor` consegue usar a `TemplateFillerTool` com sucesso.
-- [x] **4.5. Processamento do Resultado Final:**
-    - [x] A resposta final da `Crew` é corretamente interpretada.
-    - [x] A mensagem do assistente e os links para os documentos gerados são salvos corretamente no MongoDB.
-    
----
-
-### **Próximos Passos para o Desenvolvimento do Backend**
-
-#### **🎯 Foco Imediato: Tornar a IA Mais Inteligente e Flexível**
-
-**Objetivo:** Aumentar drasticamente a capacidade da IA de entender e executar uma gama maior de tarefas relacionadas a documentos.
-
-*   **[x] 1. Implementar um "Agente Conversador" para Respostas Diretas:**
-    *   **Tarefa:** Criar um novo agente, `agente_conversador`, que não possui ferramentas.
-    *   **Lógica:** Modificar o `agente_roteador` para que ele possa delegar a tarefa a este novo agente se a intenção do usuário for apenas uma pergunta geral. Isso evita que a Crew tente usar ferramentas desnecessariamente.
-
-*   **[x] 2. Criar Ferramenta de Geração de Documentos Simples:**
-    *   **Tarefa:** Desenvolver uma nova `SimpleDocumentGeneratorTool` em `tools.py`.
-    *   **Parâmetros:** `content` (o texto a ser inserido) e `file_format` ("docx", "pdf", etc.).
-    *   **Ação:** A ferramenta chamará a função `criar_docx_stream` ou `criar_pdf_stream` correspondente.
-    *   **Integração:** Adicionar esta ferramenta ao `agente_executor_de_arquivos` e ensinar o `agente_roteador` a usá-la.
-
-*   **[x] 3. Habilitar a Extração de Contexto de Arquivos Anexados:**
-    *   **Tarefa:** Refinar a `backstory` e a `goal` do `agente_roteador`.
-    *   **Lógica:** Instruí-lo a, quando o usuário pedir para preencher um template e anexar um arquivo, primeiro usar a `FileReaderTool` para extrair o conteúdo do anexo e, em seguida, usar esse conteúdo para construir o dicionário de `context` para a `TemplateFillerTool`. Isso pode exigir um passo intermediário ou um agente adicional.
-
-#### **🎯 Foco a Médio Prazo: Melhorar a Gestão de Arquivos e a Usabilidade**
-
-**Objetivo:** Dar ao usuário mais controle sobre seus dados e tornar o sistema mais intuitivo.
-
-*   **[x] 4. Implementar Nomeação de Arquivos Inteligente:**
-    *   **Tarefa:** Adicionar um novo parâmetro `output_filename` à `TemplateFillerTool` e à `SimpleDocumentGeneratorTool`.
-    *   **Lógica:** Ensinar o `agente_roteador` a extrair um nome de arquivo apropriado do prompt do usuário ou a criar um com base no contexto (ex: "proposta_cliente_x.docx"). Se nenhum nome for sugerido, um nome padrão será usado.
-
-*   **[ ] 5. Desenvolver Endpoints para Gerenciamento de Dados:**
-    *   **Tarefa:** Criar novas rotas na API para funcionalidades de CRUD (Criar, Ler, Atualizar, Deletar).
-        *   `GET /api/documents`: Listar todos os metadados dos documentos do usuário logado.
-        *   `DELETE /api/documents/<document_id>`: Excluir um documento (e seu arquivo correspondente no GridFS).
-        *   `DELETE /api/chat/messages/<message_id>`: Excluir uma mensagem específica de uma conversa.
-        *   `DELETE /api/chat/conversations/<conversation_id>`: Excluir uma conversa inteira e todas as suas mensagens.
-
-*   **[ ] 6. (Opcional) Adicionar Suporte a Anexos Múltiplos:**
-    *   **Tarefa:** Modificar a rota `POST /conversations` para aceitar uma lista de `input_document_ids` em vez de um único ID.
-    *   **Lógica:** Adaptar a lógica de enriquecimento de prompt no `ia_processor.py` para ler e concatenar o conteúdo de múltiplos arquivos.
-
----
-
-#### **🔭 Foco a Longo Prazo: Robustez e Polimento**
-
-**Objetivo:** Preparar a aplicação para um ambiente mais crítico, focando em confiabilidade e experiência do usuário.
-
-*   **[ ] 7. Implementar Tratamento de Erros Guiado por IA:**
-    *   **Tarefa:** Criar um "Agente de Análise de Erros".
-    *   **Lógica:** Dentro do bloco `except` principal do `processar_solicitacao_ia`, em vez de apenas registrar um erro genérico, passar a mensagem de erro técnica para este novo agente.
-    *   **Goal do Agente:** A meta do agente será traduzir o erro técnico (ex: "Template 'x' not found") em uma sugestão amigável e útil para o usuário (ex: "Não encontrei esse template. Você quis dizer 'y'? Os templates disponíveis são...").
-
-*   **[ ] 8. Reintroduzir o Processamento Assíncrono (Celery + Redis):**
-    *   **Tarefa:** Reverter as simplificações que fizemos. Reintroduzir o Celery, configurar o Redis e transformar a chamada `processar_solicitacao_ia` de volta em uma chamada `.delay()`.
-    *   **Frontend:** Será necessário implementar um mecanismo de *polling* ou *WebSockets* para que a interface saiba quando a tarefa foi concluída.
+*Este projeto foi desenvolvido pelo Squad 42.*
