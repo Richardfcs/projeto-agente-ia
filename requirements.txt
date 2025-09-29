@@ -1,38 +1,38 @@
 # Arquivo: requirements.txt
 
 # Framewors IA
-crewai
-crewai_tools
+crewai==0.201.1
+crewai_tools==0.75.0
 
 # Framework Web
-Flask
-Flask-Cors
-gunicorn
+Flask==3.1.2
+Flask-Cors==6.0.1
+gunicorn==23.0.0
 
 # Banco de Dados
-pymongo[srv]
+pymongo[srv]==4.15.1
 
 # Autenticação (para as próximas seções)
 passlib[bcrypt]==1.7.4
-python-jose[cryptography]
-Flask-JWT-Extended
+python-jose[cryptography]==3.5.0
+Flask-JWT-Extended==4.7.1
 
 # Manipulação de Arquivos
-python-docx
-docxtpl
-openpyxl
-pandas
-reportlab
-tabulate
+python-docx==1.2.0
+docxtpl==0.20.1
+openpyxl==3.1.5
+pandas==2.3.2
+reportlab==4.4.4
+tabulate==0.9.0
 
 # IA
-google-generativeai
+google-generativeai==0.8.5
 
 # Configuração
-python-dotenv
+python-dotenv==1.1.1
 
 # Criptografia
 bcrypt==3.2.0
 
 # Swagger
-flask-swagger-ui
+flask-swagger-ui==5.21.0
