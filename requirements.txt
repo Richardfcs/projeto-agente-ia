@@ -12,8 +12,11 @@ gunicorn==23.0.0
 # Banco de Dados
 pymongo[srv]==4.15.1
 
+# Criptografia
+bcrypt==4.0.1
+
 # Autenticação (para as próximas seções)
-passlib[bcrypt]==1.7.4
+passlib[bcrypt]
 python-jose[cryptography]==3.5.0
 Flask-JWT-Extended==4.7.1
 
@@ -30,9 +33,6 @@ google-generativeai==0.8.5
 
 # Configuração
 python-dotenv==1.1.1
-
-# Criptografia
-bcrypt==3.2.0
 
 # Swagger
 flask-swagger-ui==5.21.0
