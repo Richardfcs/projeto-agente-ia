@@ -1,11 +1,13 @@
-# Arquivo: /src/__init__.py (VERSÃO SIMPLIFICADA)
-
+# /src/__init__.py
+import logging
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from src.config import Config
 from src.db.mongo import init_db
 from flask_swagger_ui import get_swaggerui_blueprint
+
+logger = logging.getLogger(__name__)
 
 def create_app():
     """Cria e configura a instância da aplicação Flask."""
@@ -17,9 +19,26 @@ def create_app():
     jwt = JWTManager(app)
     
     with app.app_context():
+        # Inicializa DB (faz conexões necessárias)
         init_db(app)
 
-    # URL onde a sua especificação (o arquivo .yaml) estará disponível
+        # Tenta criar os agentes dinamicamente (fábrica em src.tasks.agents.create_agents)
+        # Se a função não existir ou falhar, logamos e seguimos — isso evita quebrar o startup por import-time side-effects.
+        try:
+            from src.tasks.agents import create_agents
+            agents = create_agents()
+            # Armazena os agentes na app.extensions (padrão Flask para extensões/objetos)
+            app.extensions = getattr(app, "extensions", {})
+            app.extensions["agents"] = agents
+            # opcional: também expõe como app.agents para conveniência
+            app.agents = agents
+            logger.info("Agentes instanciados e vinculados à app.extensions['agents']")
+        except Exception as e:
+            # Se ocorrer erro, não interrompa a inicialização — registre para diagnóstico.
+            logger.exception("Falha ao instanciar agentes via create_agents(): %s", e)
+            # Nota: se os blueprints/handlers dependem dos agentes, eles devem falhar de forma controlada quando tentarem usar app.agents.
+
+    # URL onde a especificação (o arquivo .yaml) estará disponível
     SWAGGER_URL = '/api/docs'
     API_URL = '/static/openapi.yaml'
 
@@ -35,7 +54,9 @@ def create_app():
     # Registra o Blueprint da Swagger
     app.register_blueprint(swaggerui_blueprint)
 
-    # Registra os Blueprints
+    # Registra os Blueprints da API
+    # IMPORTANTE: importe os blueprints aqui (após init_db e tentativa de criar agentes)
+    # Isso reduz a chance de import-time cycles causarem inicialização falha.
     from src.api.chat.routes import chat_bp
     from src.api.auth.routes import auth_bp
     from src.api.files.routes import files_bp

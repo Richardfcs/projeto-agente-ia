@@ -16,7 +16,6 @@ files_bp = Blueprint('files_bp', __name__)
 @files_bp.route('/documents/upload', methods=['POST'])
 @jwt_required()
 def upload_document():
-    """Endpoint para um usuário logado fazer upload de um documento."""
     current_user_id = get_jwt_identity()
 
     if 'file' not in request.files:
@@ -25,33 +24,45 @@ def upload_document():
     file = request.files['file']
     if file.filename == '':
         return jsonify({"erro": "Nome de arquivo vazio"}), 400
+    
+    ## SUGESTÃO (Segurança): Considere validar a extensão ou o tipo MIME do arquivo
+    ## para permitir apenas formatos esperados (ex: 'pdf', 'docx', 'png'), 
+    ## prevenindo o upload de arquivos potencialmente maliciosos.
 
     db = get_db()
     fs = get_gridfs()
     
-    # Salva o arquivo no GridFS e obtém seu ID
     file_id = fs.put(file, filename=file.filename)
 
-    # Cria o documento de metadados para associar o arquivo ao usuário
     document_meta = {
         "filename": file.filename,
         "gridfs_file_id": file_id,
         "owner_id": ObjectId(current_user_id),
         "created_at": datetime.utcnow()
     }
-    db.documents.insert_one(document_meta)
+    result = db.documents.insert_one(document_meta)
+
+    ## MELHORIA (Consistência da API): Retorne o objeto de metadado criado.
+    # Isso fornece ao cliente o 'document_id' (_id) imediatamente, que é necessário
+    # para as operações de renomear e excluir, evitando uma chamada extra.
+    created_document = {
+        "_id": str(result.inserted_id),
+        "filename": file.filename,
+        "gridfs_file_id": str(file_id),
+        "owner_id": current_user_id,
+        "created_at": document_meta["created_at"].isoformat()
+    }
 
     return jsonify({
         "mensagem": "Documento enviado com sucesso!",
-        "file_id": str(file_id)
+        "document": created_document
     }), 201
 
 @files_bp.route('/templates/upload', methods=['POST'])
 @jwt_required()
 def upload_template():
-    """Endpoint para fazer upload de um template (pode ser restrito a admins no futuro)."""
     current_user_id = get_jwt_identity()
-    # TODO: No futuro, adicionar uma verificação de role para garantir que apenas admins possam fazer isso.
+    # TODO: Adicionar verificação de role para admins.
 
     if 'file' not in request.files:
         return jsonify({"erro": "Nenhum arquivo enviado"}), 400
@@ -81,7 +92,6 @@ def upload_template():
 @files_bp.route('/files/<string:file_id>', methods=['GET'])
 @jwt_required()
 def download_file(file_id):
-    """Endpoint para baixar um arquivo do GridFS."""
     current_user_id = get_jwt_identity()
     db = get_db()
     fs = get_gridfs()
@@ -91,11 +101,6 @@ def download_file(file_id):
     except InvalidId:
         return jsonify({"erro": "ID de arquivo inválido"}), 400
 
-    # Lógica de Permissão:
-    # 1. Verifica se o arquivo é um documento pertencente ao usuário.
-    # 2. Se não for, verifica se é um template (que qualquer um pode baixar).
-    # 3. Se não for nenhum dos dois, nega o acesso.
-    
     doc_meta = db.documents.find_one({"gridfs_file_id": oid, "owner_id": ObjectId(current_user_id)})
     template_meta = db.templates.find_one({"gridfs_file_id": oid})
 
@@ -104,11 +109,15 @@ def download_file(file_id):
 
     try:
         gridfs_file = fs.get(oid)
-        # Usa BytesIO para carregar o arquivo em memória para o send_file
-        file_stream = io.BytesIO(gridfs_file.read())
+        
+        ## MELHORIA (Desempenho): Evite carregar o arquivo inteiro na memória.
+        # O objeto 'gridfs_file' já é um stream. Passe-o diretamente para o send_file
+        # para que o Flask faça o streaming do arquivo em pedaços (chunks).
+        # Isso economiza muita memória em arquivos grandes.
+        # Original: file_stream = io.BytesIO(gridfs_file.read())
         
         return send_file(
-            file_stream,
+            gridfs_file,
             download_name=gridfs_file.filename,
             as_attachment=True
         )
@@ -118,13 +127,17 @@ def download_file(file_id):
 @files_bp.route('/documents', methods=['GET'])
 @jwt_required()
 def list_documents():
-    """Lista todos os metadados dos documentos pertencentes ao usuário logado."""
     current_user_id = get_jwt_identity()
     db = get_db()
     
+    ## SUGESTÃO (Escalabilidade): Implementar paginação para evitar sobrecarga.
+    # Ex: page = request.args.get('page', 1, type=int)
+    # Ex: limit = request.args.get('limit', 20, type=int)
+    # Ex: .skip((page - 1) * limit).limit(limit)
+    
     docs_cursor = db.documents.find(
         {"owner_id": ObjectId(current_user_id)}
-    ).sort("created_at", -1) # Ordena dos mais recentes para os mais antigos
+    ).sort("created_at", -1)
 
     documents_list = []
     for doc in docs_cursor:
@@ -138,7 +151,6 @@ def list_documents():
 @files_bp.route('/documents/<string:document_id>', methods=['DELETE'])
 @jwt_required()
 def delete_document(document_id):
-    """Exclui um documento e seu arquivo correspondente no GridFS."""
     current_user_id = get_jwt_identity()
     db = get_db()
     fs = get_gridfs()
@@ -148,17 +160,17 @@ def delete_document(document_id):
     except InvalidId:
         return jsonify({"erro": "ID de documento inválido"}), 400
 
-    # 1. Encontrar o metadado do documento para verificar a permissão e obter o ID do GridFS
     doc_meta = db.documents.find_one_and_delete({
         "_id": doc_oid,
         "owner_id": ObjectId(current_user_id)
     })
 
     if not doc_meta:
-        # Se não encontrou, ou o documento não existe ou não pertence ao usuário
         return jsonify({"erro": "Documento não encontrado ou acesso negado"}), 404
 
-    # 2. Se o metadado foi encontrado e excluído, exclui o arquivo no GridFS
+    ## OBSERVAÇÃO (Robustez): Se a operação a seguir falhar, o arquivo
+    ## no GridFS ficará "órfão". Para sistemas críticos, considere adicionar
+    ## um log de erro aqui para facilitar a limpeza posterior.
     gridfs_file_id = doc_meta.get("gridfs_file_id")
     if gridfs_file_id:
         fs.delete(gridfs_file_id)
@@ -168,17 +180,23 @@ def delete_document(document_id):
 @files_bp.route('/documents/search', methods=['GET'])
 @jwt_required()
 def search_documents():
-    """Busca documentos do usuário por nome."""
     current_user_id = get_jwt_identity()
-    query = request.args.get('q', '') # Pega o parâmetro 'q' da URL
+    query = request.args.get('q', '')
 
     if not query:
         return jsonify({"erro": "Parâmetro de busca 'q' é obrigatório"}), 400
 
     db = get_db()
-    # Usa regex para busca parcial, 'i' para ser case-insensitive
+    
+    ## MELHORIA (Desempenho): A busca com regex pode ser lenta.
+    # Para uma melhor performance, crie um índice de texto no campo 'filename' no MongoDB
+    # e use a busca por texto.
+    # 1. Crie o índice (apenas uma vez): `db.documents.create_index([("filename", "text")])`
+    # 2. Mude a query para: `{"owner_id": ObjectId(current_user_id), "$text": {"$search": query}}`
+    # A query atual funciona, mas não escala bem.
     search_regex = re.compile(f".*{re.escape(query)}.*", re.IGNORECASE)
     
+    ## SUGESTÃO (Escalabilidade): Adicione paginação aqui também.
     docs_cursor = db.documents.find({
         "owner_id": ObjectId(current_user_id),
         "filename": search_regex
@@ -193,11 +211,9 @@ def search_documents():
         
     return jsonify(documents_list)
 
-# --- NOVA ROTA DE RENOMEAR ---
 @files_bp.route('/documents/<string:document_id>/rename', methods=['PUT'])
 @jwt_required()
 def rename_document(document_id):
-    """Renomeia um documento existente."""
     current_user_id = get_jwt_identity()
     data = request.get_json()
     new_filename = data.get("new_filename")
@@ -212,34 +228,27 @@ def rename_document(document_id):
     except InvalidId:
         return jsonify({"erro": "ID de documento inválido"}), 400
 
-    # 1. Encontra o nosso metadado para garantir a permissão
     doc_meta = db.documents.find_one({"_id": doc_oid, "owner_id": ObjectId(current_user_id)})
     if not doc_meta:
         return jsonify({"erro": "Documento não encontrado ou acesso negado"}), 404
 
-    # 2. Renomeia o metadado na nossa coleção 'documents'
+    # Atualiza o metadado na coleção 'documents'
     db.documents.update_one({"_id": doc_oid}, {"$set": {"filename": new_filename}})
     
-    # --- A MUDANÇA ESTÁ AQUI ---
-    # 3. Renomeia o metadado na coleção 'fs.files' do GridFS
-    # O GridFS armazena seus metadados em uma coleção chamada 'fs.files'.
-    # Nós podemos atualizá-la diretamente.
+    ## OBSERVAÇÃO (Robustez): Assim como no delete, esta é uma segunda operação de escrita.
+    ## Se ela falhar, os nomes ficarão inconsistentes entre a sua coleção e a do GridFS.
     gridfs_file_id = doc_meta.get("gridfs_file_id")
     if gridfs_file_id:
         db.fs.files.update_one(
             {"_id": gridfs_file_id},
             {"$set": {"filename": new_filename}}
         )
-    # --- FIM DA MUDANÇA ---
     
     return jsonify({"mensagem": "Documento renomeado com sucesso."})
 
-
-# --- NOVA ROTA PARA LISTAR TEMPLATES ---
 @files_bp.route('/templates', methods=['GET'])
 @jwt_required()
 def list_templates():
-    """Lista todos os templates disponíveis no sistema."""
     db = get_db()
     templates_cursor = db.templates.find({}).sort("filename", 1)
     

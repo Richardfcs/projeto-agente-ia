@@ -1,100 +1,112 @@
-# Arquivo: /src/tasks/agents.py
-
+# /src/tasks/agents.py (refatorado - mantendo LLM nativo do CrewAI)
+from typing import Dict
+# Mantendo a importação original como solicitado
 from crewai import Agent, LLM
-from src.tasks.tools import FileReaderTool, TemplateFillerTool, SimpleDocumentGeneratorTool, DatabaseQueryTool, TemplateInspectorTool, TemplateListerTool 
 from src.config import Config
 
-# --- CONFIGURAÇÃO DO LLM ---
-# Recomenda-se usar um modelo estável e publicamente disponível.
-llm = LLM(
-    model="gemini/gemini-2.5-flash",
-    temperature=0.8
-)
+# NÃO importar tools aqui para evitar ciclos; a importação é feita dentro da fábrica.
 
-# --- INSTÂNCIA DAS FERRAMENTAS ---
-# É uma boa prática instanciar todas as ferramentas aqui.
-file_reader_tool = FileReaderTool()
-template_filler_tool = TemplateFillerTool()
-simple_doc_generator_tool = SimpleDocumentGeneratorTool()
-database_query_tool = DatabaseQueryTool()
-template_inspector_tool = TemplateInspectorTool()
-template_lister_tool = TemplateListerTool()
+def create_agents() -> Dict[str, Agent]:
+    """
+    Instancia o LLM e os agentes. Use esta função no startup do app (por ex. create_app()).
+    Retorna um dict com os agentes para uso pela camada orquestradora.
+    """
+    # Configurável via Config. O CrewAI suporta o formato "provider/model"
+    model_name = getattr(Config, "LLM_MODEL", "gemini/gemini-2.5-flash")
+    temp = getattr(Config, "LLM_TEMPERATURE", 0.7)
+    debug_verbose = getattr(Config, "DEBUG_VERBOSE_AGENTS", False)
 
+    # Usando a classe nativa LLM do CrewAI, conforme solicitado.
+    # Isso funcionará perfeitamente se suas variáveis de ambiente (ex: GOOGLE_API_KEY) estiverem configuradas.
+    llm = LLM(model=model_name, temperature=temp)
 
-# --- DEFINIÇÃO DOS AGENTES DA EQUIPE ---
+    # Importar as ferramentas aqui para reduzir risco de import cycle
+    from src.tasks.tools import (
+        FileReaderTool,
+        TemplateFillerTool,
+        SimpleDocumentGeneratorTool,
+        DatabaseQueryTool,
+        TemplateInspectorTool,
+        TemplateListerTool,
+    )
 
-agente_gerente = Agent(
-    role="Gerente de Projetos de IA",
-    goal="Analisar solicitações do usuário e o histórico para orquestrar sua equipe de especialistas, delegando tarefas de forma clara e sequencial para atingir o objetivo final.",
-    backstory=(
-        "Você é o Gerente. Sua única função é pensar, planejar e delegar. Você recebe uma solicitação complexa "
-        "e a quebra em subtarefas lógicas para sua equipe. Você não executa trabalho prático. "
-        "Sua principal ferramenta é a 'Delegate work to coworker'. Você deve fornecer TODO o contexto necessário "
-        "em cada delegação, pois seus especialistas não têm acesso ao histórico completo."
-    ),
-    llm=llm,
-    tools=[],
-    allow_delegation=True,
-    verbose=True
-)
+    # Instanciar tools
+    file_reader_tool = FileReaderTool()
+    template_filler_tool = TemplateFillerTool()
+    template_inspector_tool = TemplateInspectorTool()
+    simple_doc_generator_tool = SimpleDocumentGeneratorTool()
+    database_query_tool = DatabaseQueryTool()
+    template_lister_tool = TemplateListerTool()
 
-agente_especialista_documentos = Agent(
-    role="Especialista em Documentos",
-    goal="Executar tarefas específicas de manipulação de arquivos usando as ferramentas fornecidas.",
-    backstory=(
-        "Você é um especialista focado. Você recebe uma tarefa clara do seu Gerente e a executa. "
-        "Sua função é usar as ferramentas (`FileReaderTool`, `TemplateFillerTool`, etc.) "
-        "com os parâmetros exatos que lhe foram fornecidos."
-    ),
-    llm=llm,
-    tools=[
-        file_reader_tool,
-        template_filler_tool,
-        simple_doc_generator_tool,
-        database_query_tool
-    ],
-    allow_delegation=False,
-    verbose=True
-)
+    # --- Agentes ---
+    
+    agente_gerente = Agent(
+        role="Gerente de Projetos de IA",
+        goal=(
+            "Analisar solicitações do usuário e o histórico para orquestrar sua equipe "
+            "de especialistas, decompondo a solicitação principal em um plano de subtarefas claro."
+        ),
+        backstory=(
+            "Você é o Gerente. Você planeja e cria um plano de execução. NÃO executa trabalho prático. "
+            "Sua função é delegar para o especialista correto."
+        ),
+        llm=llm,
+        tools=[],  # Gerente não acessa ferramentas diretamente; ele delega.
+        allow_delegation=False,  # Essencial para a orquestração funcionar
+        verbose=debug_verbose,
+    )
 
-agente_conversador = Agent(
-    role="Especialista em Conversação",
-    goal="Responder diretamente a perguntas gerais do usuário.",
-    backstory="Você é um assistente de IA amigável. Você recebe uma pergunta do seu Gerente e a responde da melhor forma possível.",
-    llm=llm,
-    tools=[],
-    allow_delegation=False,
-    verbose=True
-)
+    agente_analista_de_conteudo = Agent(
+        role="Analista de Conteúdo e Estrutura",
+        # MELHORIA: Objetivo mais explícito sobre o formato de saída esperado.
+        goal="Analisar um pedido e um template para gerar o conteúdo necessário. A saída deve ser um dicionário (JSON) mapeando cada placeholder ao seu conteúdo.",
+        backstory="Você é especialista em mapear placeholders para conteúdo. Sua primeira ação é sempre inspecionar o template.",
+        llm=llm,
+        tools=[template_inspector_tool],
+        allow_delegation=False,
+        verbose=debug_verbose,
+    )
 
-agente_analista_de_conteudo = Agent(
-    role="Analista de Conteúdo e Estrutura",
-    goal="Com base em uma lista de placeholders de um template e no pedido do usuário, gerar o conteúdo para cada placeholder, estruturando-o em um dicionário JSON (contexto).",
-    backstory=(
-        "Você é um especialista em mapeamento de dados. Você recebe uma 'lista de compras' (os placeholders) "
-        "e uma 'conversa' (o prompt do usuário). Sua única tarefa é gerar o conteúdo para cada item da lista "
-        "e devolver tudo em um único JSON pronto para ser usado pela ferramenta de preenchimento."
-    ),
-    llm=llm,
-    tools=[template_inspector_tool], # Este agente apenas pensa e escreve.
-    verbose=True
-)
+    agente_especialista_documentos = Agent(
+        role="Especialista em Documentos",
+        goal="Executar tarefas técnicas de criação, leitura e preenchimento de arquivos usando as ferramentas fornecidas.",
+        backstory="Você é um executor técnico. Use as tools com os parâmetros exatos que lhe forem passados.",
+        llm=llm,
+        tools=[
+            file_reader_tool,
+            template_filler_tool,
+            simple_doc_generator_tool,
+            database_query_tool,
+        ],
+        allow_delegation=False,
+        verbose=debug_verbose,
+    )
 
-agente_revisor_final = Agent(
-    role="Revisor Final e Especialista em Comunicação",
-    goal=(
-        "Analisar o resultado final de uma tarefa, que pode ser uma mensagem de sucesso ou uma mensagem de erro. "
-        "Formatar este resultado em uma resposta final, clara, amigável e útil para o usuário. "
-        "Se for um erro, explique o problema em termos simples e sugira soluções."
-    ),
-    backstory=(
-        "Você é a voz final do sistema. Sua especialidade é a comunicação. Você pega o resultado técnico "
-        "produzido pelos outros agentes e o transforma em uma resposta polida para o cliente. "
-        "Se a tarefa foi um sucesso, você parabeniza e informa o resultado. Se foi uma falha, você age como "
-        "um suporte técnico prestativo, usando suas ferramentas para diagnosticar e sugerir correções."
-    ),
-    llm=llm,
-    tools=[template_lister_tool], # Ele tem a ferramenta para listar templates em caso de erro.
-    allow_delegation=False,
-    verbose=True
-)
+    agente_revisor_final = Agent(
+        role="Revisor Final e Especialista em Comunicação",
+        goal="Analisar o resultado final técnico e formatar a resposta ao usuário de forma amigável.",
+        backstory="Você transforma resultados técnicos (como IDs de documentos) em mensagens polidas e úteis para o usuário.",
+        llm=llm,
+        # MELHORIA: Adicionado database_query_tool, permitindo que ele verifique o resultado final se necessário.
+        tools=[template_lister_tool, database_query_tool],
+        allow_delegation=False,
+        verbose=debug_verbose,
+    )
+    
+    agente_conversador = Agent(
+        role="Especialista em Conversação",
+        goal="Responder perguntas gerais do usuário.",
+        backstory="Assistente amigável.",
+        llm=llm,
+        tools=[],
+        allow_delegation=False,
+        verbose=debug_verbose,
+    )
+
+    return {
+        "gerente": agente_gerente,
+        "especialista_documentos": agente_especialista_documentos,
+        "analista_de_conteudo": agente_analista_de_conteudo,
+        "revisor_final": agente_revisor_final,
+        "conversador": agente_conversador,
+    }
