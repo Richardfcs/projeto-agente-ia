@@ -1,136 +1,272 @@
-# Arquivo: /src/tasks/ia_processor.py
+# /src/tasks/ia_processor.py (versão final, completa e robusta)
 
 import json
+import logging
+import re
 from datetime import datetime
+from typing import Dict, Any, List, Optional
+
 from bson import ObjectId
-
-from crewai import Crew, Process, Task
+from crewai import Crew, Process, Task, Agent
 from src.db.mongo import get_db
-# Importa todos os agentes que a Crew pode precisar
-from src.tasks.agents import agente_gerente, agente_especialista_documentos, agente_conversador, agente_analista_de_conteudo, agente_revisor_final
 
-# Esta função principal é a única que precisa ser importada pelas rotas.
+logger = logging.getLogger(__name__)
+
+# --- Funções de Suporte ---
+
+# Carregador Resiliente de Agentes
+# Garante que os agentes estejam disponíveis, seja em um contexto Flask ou não.
+try:
+    from src.tasks.agents import create_agents
+except ImportError:
+    create_agents = None
+
+_module_agents: Dict[str, Any] = {}
+
+def _ensure_agents() -> Dict[str, Any]:
+    """
+    Garante que exista um dicionário com agentes disponível.
+    1) Tenta obter de current_app.agents (quando em contexto Flask).
+    2) Se não houver contexto, usa um cache local se já preenchido.
+    3) Como fallback, cria os agentes usando a fábrica create_agents().
+    """
+    global _module_agents
+    try:
+        from flask import current_app
+        app_agents = getattr(current_app, "agents", current_app.extensions.get("agents"))
+        if app_agents:
+            _module_agents = app_agents
+            return _module_agents
+    except (RuntimeError, AttributeError):
+        # Ignora se não houver contexto de aplicação Flask.
+        pass
+
+    if _module_agents:
+        return _module_agents
+
+    if create_agents is None:
+        raise RuntimeError("Fábrica de agentes create_agents() não pôde ser importada.")
+
+    try:
+        _module_agents = create_agents()
+        return _module_agents
+    except Exception as e:
+        logger.exception("Falha ao criar agentes dinamicamente via create_agents(): %s", e)
+        raise RuntimeError(f"Erro ao instanciar agentes via create_agents(): {e}") from e
+
+# Agente Classificador de Intenção
+def _classificar_intencao(historico_texto: str) -> str:
+    """
+    Usa um agente simples para classificar a intenção do usuário em uma categoria predefinida.
+    Esta é a etapa de "roteamento" que adiciona flexibilidade ao sistema.
+    """
+    agents = _ensure_agents()
+    gerente = agents["gerente"] # Usamos a inteligência do gerente para classificar
+
+    task = Task(
+        description=(
+            "Analise o histórico da conversa, focando na última mensagem do usuário, para classificar a intenção principal. "
+            "Responda APENAS com uma das seguintes categorias, sem nenhuma outra palavra ou pontuação:\n"
+            "- 'PREENCHER_TEMPLATE'\n"
+            "- 'CRIAR_DOCUMENTO_SIMPLES'\n"
+            "- 'LER_DOCUMENTO'\n"
+            "- 'CONVERSA_GERAL'\n\n"
+            "Se o usuário menciona um nome de arquivo de template (ex: 'TEMPLATE_TPF.docx'), a intenção é 'PREENCHER_TEMPLATE'.\n"
+            "Se ele pede um relatório ou documento mas não menciona um template, é 'CRIAR_DOCUMENTO_SIMPLES'.\n"
+            "Se ele faz uma pergunta sobre um documento anexado, é 'LER_DOCUMENTO'.\n"
+            "Para qualquer outra coisa (saudações, perguntas genéricas), é 'CONVERSA_GERAL'.\n\n"
+            f"--- HISTÓRICO ---\n{historico_texto}"
+        ),
+        expected_output="Uma única string de categoria: PREENCHER_TEMPLATE, CRIAR_DOCUMENTO_SIMPLES, LER_DOCUMENTO, ou CONVERSA_GERAL.",
+        agent=gerente,
+    )
+    
+    crew = Crew(agents=[gerente], tasks=[task], verbose=0)
+    resultado = crew.kickoff()
+    
+    # Converte o objeto de resultado 'CrewOutput' para uma string antes de chamar .strip()
+    return str(resultado).strip()
+
+# Extrator de Nome de Template
+def _extrair_nome_template(texto: str) -> Optional[str]:
+    """
+    Usa regex para encontrar um nome de arquivo de template no texto.
+    Procura por padrões como 'TEMPLATE_TPF.docx' entre aspas.
+    """
+    match = re.search(r"\'([\w\d_-]+\.docx?)\'|\"([\w\d_-]+\.docx?)\"", texto, re.IGNORECASE)
+    if match:
+        # O resultado pode estar no grupo 1 (aspas simples) ou 2 (aspas duplas)
+        return match.group(1) or match.group(2)
+    return None
+
+def _extrair_extensao_desejada(texto: str) -> str:
+    """Detecta a extensão de arquivo solicitada no prompt e retorna 'docx', 'xlsx', ou 'pdf'."""
+    texto_lower = texto.lower()
+    if 'xlsx' in texto_lower or 'planilha' in texto_lower or 'excel' in texto_lower:
+        return 'xlsx'
+    if 'pdf' in texto_lower:
+        return 'pdf'
+    # DOCX é o padrão se nada for especificado
+    return 'docx'
+
+# --- Orquestrador Principal ---
 def processar_solicitacao_ia(message_id: str) -> str:
     """
-    Orquestra uma equipe de agentes de IA usando um processo hierárquico
-    para processar uma solicitação de usuário de forma inteligente.
+    Orquestra a equipe de IA classificando a intenção do usuário primeiro e
+    depois construindo um pipeline de tarefas sequencial e explícito.
     """
-    print(f"Orquestrando CrewAI com processo hierárquico para a mensagem: {message_id}")
+    logger.info("Iniciando orquestração com roteamento de intenção para a mensagem: %s", message_id)
     db = get_db()
     
+    mensagem_atual = None
     try:
-        # 1. Obter Contexto Completo da Conversa
+        # Garante que temos as instâncias dos agentes
+        agents = _ensure_agents()
+        analista = agents["analista_de_conteudo"]
+        especialista_doc = agents["especialista_documentos"]
+        revisor = agents["revisor_final"]
+
+        # Obtém todo o contexto da conversa do banco de dados
         mensagem_atual = db.messages.find_one({"_id": ObjectId(message_id)})
-        if not mensagem_atual:
-            print(f"ERRO: Mensagem com ID {message_id} não encontrada.")
-            return "Falha"
+        conversation_id = mensagem_atual["conversation_id"]
+        user_id = str(mensagem_atual["user_id"])
+        historico_cursor = db.messages.find({"conversation_id": conversation_id}).sort("timestamp", 1)
+        historico_texto = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in historico_cursor])
 
-        conversation_id = mensagem_atual.get("conversation_id")
-        user_id = str(mensagem_atual.get("user_id"))
-        input_doc_id = str(mensagem_atual.get("input_document_id")) if mensagem_atual.get("input_document_id") else "Nenhum"
+        # Passo 1: Usa o agente classificador para entender o que o usuário quer
+        intencao = _classificar_intencao(historico_texto)
+        logger.info(f"Intenção detectada: {intencao}")
 
-        historico_cursor = db.messages.find(
-            {"conversation_id": conversation_id}
-        ).sort("timestamp", 1)
-        historico_completo = list(historico_cursor)
-        
-        # Constrói uma representação em texto do histórico para o agente entender
-        historico_texto = "\n".join(
-            [f"{msg['role']}: {msg['content']}" for msg in historico_completo]
-        )
+        # Passo 2: Monta dinamicamente a lista de tarefas e agentes para a Crew
+        tasks: List[Task] = []
+        crew_agents: List[Agent] = []
 
-        tarefa_principal = Task(
-            description=(
-                "Você é o gerente de uma equipe de especialistas em IA. Sua missão é analisar a solicitação do usuário e o histórico da conversa para criar um plano de execução passo a passo. "
-                "Seu único trabalho é decompor a solicitação principal em uma lista de subtarefas para sua equipe. "
-                "Você deve identificar qual especialista é o mais adequado para cada subtarefa.\n\n"
+        if intencao == 'PREENCHER_TEMPLATE':
+            template_name = _extrair_nome_template(historico_texto)
+            if not template_name:
+                intencao = 'CONVERSA_GERAL'
+                historico_texto += "\n\nsystem: A intenção parece ser preencher um template, mas o nome do arquivo não foi encontrado. Peça ao usuário para especificar o nome do template."
+            else:
+                logger.info(f"Template detectado: {template_name}")
+                
+                # --- MUDANÇA CRÍTICA: PROMPT MUITO MAIS DETALHADO E INTELIGENTE ---
+                tarefa_analise = Task(
+                    description=(
+                        f"Sua missão é gerar um dicionário JSON completo para preencher o template '{template_name}'.\n"
+                        "**PROCESSO OBRIGATÓRIO:**\n"
+                        "1. **INSPECIONE:** Primeiro, use a ferramenta `Inspetor de Placeholders de Template` com o nome do template '{template_name}' para obter a lista exata de TODAS as variáveis que ele espera.\n"
+                        "2. **ANALISE E GERE:** Leia o histórico da conversa e a lista de placeholders que você obteve. Sua tarefa é criar um objeto JSON onde as **chaves são um espelho exato** dos placeholders encontrados. Para cada placeholder, gere o conteúdo apropriado com base na conversa.\n"
+                        "   - Se um placeholder for um loop (ex: `secoes` ou `itens`), crie uma lista de objetos.\n"
+                        "   - Infira valores para campos como títulos e datas a partir do contexto.\n"
+                        "   - Se o usuário não forneceu dados para um placeholder, inclua a chave no JSON com um valor vazio (ex: `\"placeholder_desconhecido\": \"\"` ou `\"lista_vazia\": []`). NUNCA omita uma chave que a ferramenta de inspeção encontrou.\n\n"
+                        f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}"
+                    ),
+                    expected_output=(
+                        "Um único bloco de código JSON finalizado. As chaves deste JSON devem corresponder "
+                        "exatamente aos placeholders retornados pela ferramenta `Inspetor de Placeholders de Template`."
+                    ),
+                    agent=analista
+                )
 
-                "**COMO CRIAR O PLANO DE TAREFAS:**\n"
-                "Para cada etapa do plano, você deve definir claramente:\n"
-                "- `description`: O que o especialista precisa fazer, com todo o contexto necessário.\n"
-                "- `expected_output`: Qual é o resultado esperado para essa etapa específica.\n"
+                tarefa_preenchimento = Task(
+                    description=(
+                        f"Use a ferramenta 'TemplateFillerTool' para criar um documento. "
+                        f"O nome do template a ser usado é EXATAMENTE '{template_name}'.\n"
+                        f"Use o JSON da tarefa anterior como o contexto para preenchimento.\n"
+                        f"O ID do usuário (owner_id) é '{user_id}'.\n"
+                        f"Dê um nome de arquivo de saída apropriado ao documento final."
+                    ),
+                    expected_output="O resultado estruturado da ferramenta TemplateFillerTool.",
+                    agent=especialista_doc,
+                    context=[tarefa_analise]
+                )
+                tasks = [tarefa_analise, tarefa_preenchimento]
+                crew_agents = [analista, especialista_doc]
 
-                "**LÓGICA DE FINALIZAÇÃO DA TAREFA:**\n"
-                "1. **SE o objetivo é CRIAR UM DOCUMENTO** (usando um template ou gerando um novo arquivo):\n"
-                "   - O plano deve ter pelo menos duas etapas: uma para o `Analista de Conteúdo` gerar o JSON, e a etapa final para o `Especialista em Documentos` preencher o template.\n"
-                "   - A `expected_output` da última tarefa do `Especialista em Documentos` deve ser a mensagem de sucesso com o ID do documento.\n"
-                "2. **SE o objetivo é uma PERGUNTA ou CONVERSA:**\n"
-                "   - O plano deve ter uma única tarefa para o `Especialista em Conversação`, e o resultado será a resposta dele.\n"
-                "3. **SE ocorrer um ERRO:**\n"
-                "   - O plano deve delegar a mensagem de erro para o `Revisor Final` para que ele formule uma resposta amigável.\n\n"
+        if intencao == 'CRIAR_DOCUMENTO_SIMPLES':
+            # --- MUDANÇA: Detecção e injeção da extensão ---
+            extensao = _extrair_extensao_desejada(historico_texto)
+            logger.info(f"Extensão de arquivo simples detectada: {extensao}")
 
-                "**Sua Equipe de Especialistas (para atribuir as tarefas):**\n"
-                "- `Especialista em Documentos`\n"
-                "- `Analista de Conteúdo e Estrutura`\n"
-                "- `Especialista em Conversação`\n"
-                "- `Revisor Final e Especialista em Comunicação`\n\n"
+            tarefa_escrita = Task(
+                description=(
+                    "Escreva o conteúdo textual completo para o documento solicitado pelo usuário. "
+                    f"Se for para uma planilha ({extensao == 'xlsx'}), estruture o texto de forma tabular, "
+                    "usando quebras de linha para as linhas e algum separador (como vírgula ou ponto-e-vírgula) para as colunas."
+                    f"\n--- HISTÓRICO ---\n{historico_texto}"
+                ),
+                expected_output="Um texto completo e bem formatado para o corpo do documento.",
+                agent=revisor
+            )
+            tarefa_criacao = Task(
+                description=(
+                    "Use a ferramenta 'SimpleDocumentGeneratorTool' para transformar o texto da tarefa anterior em um arquivo. "
+                    f"O ID do usuário (owner_id) é '{user_id}'.\n"
+                    f"O nome do arquivo de saída DEVE terminar com a extensão '.{extensao}'. Dê um nome de arquivo apropriado."
+                ),
+                expected_output="O resultado estruturado da ferramenta SimpleDocumentGeneratorTool.",
+                agent=especialista_doc,
+                context=[tarefa_escrita]
+            )
+            tasks = [tarefa_escrita, tarefa_criacao]
+            crew_agents = [revisor, especialista_doc]
+            
+        if not tasks: # Se nenhum pipeline foi montado (ex: CONVERSA_GERAL ou fallback)
+            tarefa_conversa = Task(
+                description=f"Formule uma resposta amigável e útil para a última pergunta ou comentário do usuário.\n--- HISTÓRICO ---\n{historico_texto}",
+                expected_output="O texto da resposta final para o usuário.",
+                agent=revisor
+            )
+            tasks = [tarefa_conversa]
+            crew_agents = [revisor]
 
-                f"**INFORMAÇÕES CRÍTICAS PARA O PLANO:**\n"
-                f"- ID do usuário (owner_id): '{user_id}'\n"
-                f"- ID do documento anexado pelo usuário: '{input_doc_id}'\n\n"
-
-                f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}"
-            ),
-            expected_output=(
-                "Uma lista de tarefas detalhadas e prontas para serem executadas pela equipe, seguindo a lógica de finalização."
-            ),
-            agent=agente_gerente
-        )
-
+        # Passo 3: Executa a Crew com o pipeline sequencial e explícito
         crew = Crew(
-            agents=[agente_especialista_documentos, agente_analista_de_conteudo, agente_conversador, agente_revisor_final],
-            tasks=[tarefa_principal],
-            process=Process.hierarchical,
-            manager_llm=agente_gerente.llm,
+            agents=crew_agents,
+            tasks=tasks,
+            process=Process.sequential,
             verbose=True,
         )
-
         resultado_crew = crew.kickoff()
-
-        print(f"Resultado final da Crew: {resultado_crew}")
-
-        # 4. Processar o Resultado e Atualizar o Banco de Dados
         
-        # A lógica aqui pode ser refinada. Assumimos que o resultado da crew
-        # é a resposta final do assistente.
-        resposta_assistente = str(resultado_crew)
+        # Passo 4: Processa o resultado final e salva no banco de dados
+        logger.info("Resultado bruto da Crew: %s", str(resultado_crew))
+        resposta_final = ""
         generated_doc_id = None
-        
-        # Tenta extrair o ID do documento da resposta da ferramenta
-        if "O ID do metadado do novo documento é:" in resposta_assistente:
-            try:
-                doc_id_str = resposta_assistente.split(":")[-1].strip()
-                generated_doc_id = ObjectId(doc_id_str)
-            except:
-                pass 
+        try:
+            # Tenta interpretar a saída como JSON (se a última tarefa usou uma ferramenta)
+            dados_resultado = json.loads(str(resultado_crew))
+            if isinstance(dados_resultado, dict):
+                resposta_final = dados_resultado.get("message") or dados_resultado.get("content", str(dados_resultado))
+                if dados_resultado.get("status") == "success" and dados_resultado.get("document_id"):
+                    generated_doc_id = ObjectId(dados_resultado["document_id"])
+        except (json.JSONDecodeError, TypeError):
+            # Se não for JSON, trata como texto puro (se a última tarefa foi conversacional)
+            resposta_final = str(resultado_crew)
 
         assistant_message = {
             "conversation_id": conversation_id,
             "role": "assistant",
-            "content": resposta_assistente,
+            "content": resposta_final,
             "generated_document_id": generated_doc_id,
             "user_id": ObjectId(user_id),
             "timestamp": datetime.utcnow()
         }
         db.messages.insert_one(assistant_message)
+        db.conversations.update_one({"_id": conversation_id}, {"$set": {"last_updated_at": datetime.utcnow()}})
         
-        db.conversations.update_one(
-            {"_id": conversation_id},
-            {"$set": {"last_updated_at": datetime.utcnow()}}
-        )
-
-        print(f"Processamento com CrewAI para a mensagem {message_id} concluído.")
+        logger.info("Orquestração com roteamento para a mensagem %s concluída.", message_id)
         return "Sucesso"
 
     except Exception as e:
-        print(f"ERRO CRÍTICO ao orquestrar a CrewAI para a mensagem {message_id}: {e}")
-        # Lógica de tratamento de erro (salvar mensagem de falha no DB)
-        db.messages.insert_one({
-            "conversation_id": mensagem_atual.get("conversation_id") if 'mensagem_atual' in locals() else None,
-            "role": "assistant",
-            "content": f"Ocorreu um erro interno ao processar sua solicitação.",
-            "user_id": mensagem_atual.get("user_id") if 'mensagem_atual' in locals() else None,
-            "timestamp": datetime.utcnow(),
-            "is_error": True
-        })
+        logger.exception("ERRO CRÍTICO ao orquestrar a CrewAI para a mensagem %s: %s", message_id, e)
+        if mensagem_atual:
+            db.messages.insert_one({
+                "conversation_id": mensagem_atual.get("conversation_id"),
+                "role": "assistant",
+                "content": "Ocorreu um erro interno grave ao processar sua solicitação. A equipe técnica foi notificada.",
+                "user_id": mensagem_atual.get("user_id"),
+                "timestamp": datetime.utcnow(),
+                "is_error": True
+            })
         return "Falha"
