@@ -19,7 +19,8 @@ def create_app():
     # Define de quais origens (URLs de frontend) aceitaremos requisições.
     origins = [
         "http://localhost:3000",
-        "https://agente-ia-squad42.onrender.com"
+        "https://agente-ia-squad42.onrender.com",
+        "https://test-tpf.netlify.app/",
     ]
     
     # Aplica a configuração do CORS à aplicação inteira.
