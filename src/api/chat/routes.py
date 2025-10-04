@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from bson.errors import InvalidId
 from datetime import datetime
-from src.db.mongo import get_db
+from src.db.mongo import get_db, get_gridfs
 from src.tasks.ia_processor import processar_solicitacao_ia
 
 chat_bp = Blueprint('chat_bp', __name__)
