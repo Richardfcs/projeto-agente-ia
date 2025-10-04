@@ -15,7 +15,18 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     
-    CORS(app)
+    # --- CONFIGURAÇÃO DE CORS ---
+    # Define de quais origens (URLs de frontend) aceitaremos requisições.
+    origins = [
+        "http://localhost:3000",
+        "https://agente-ia-squad42.onrender.com"
+    ]
+    
+    # Aplica a configuração do CORS à aplicação inteira.
+    # `supports_credentials=True` é essencial para permitir que o frontend
+    # envie headers de autenticação (como nosso token JWT).
+    CORS(app, origins=origins, supports_credentials=True)
+    
     jwt = JWTManager(app)
     
     with app.app_context():
@@ -35,7 +46,7 @@ def create_app():
             logger.info("Agentes instanciados e vinculados à app.extensions['agents']")
         except Exception as e:
             # Se ocorrer erro, não interrompa a inicialização — registre para diagnóstico.
-            logger.exception("Falha ao instanciar agentes via create_agents(): %s", e)
+            logger.exception("Falha ao instancenciar agentes via create_agents(): %s", e)
             # Nota: se os blueprints/handlers dependem dos agentes, eles devem falhar de forma controlada quando tentarem usar app.agents.
 
     # URL onde a especificação (o arquivo .yaml) estará disponível
