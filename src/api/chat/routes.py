@@ -126,22 +126,30 @@ def get_conversation_history(conversation_id_str):
     except InvalidId:
         return jsonify({"erro": "ID de conversa inválido"}), 400
     
-    conv = db.conversations.find_one({"_id": conversation_id, "user_id": ObjectId(current_user_id)})
+    # Verifica se a conversa existe e pertence ao usuário logado
+    conv = db.conversations.find_one({
+        "_id": conversation_id, 
+        "user_id": ObjectId(current_user_id)
+    })
     if not conv:
         return jsonify({"erro": "Conversa não encontrada ou acesso negado"}), 404
     
+    # Busca todas as mensagens da conversa, ordenadas pela data de criação
     msgs_cursor = db.messages.find(
         {"conversation_id": conversation_id}
     ).sort("timestamp", 1)
     
     messages = []
     for msg in msgs_cursor:
-        msg['_id'] = str(msg['_id'])
-        msg['conversation_id'] = str(msg['conversation_id'])
-        msg['user_id'] = str(msg['user_id'])
-        if 'generated_document_id' in msg and msg['generated_document_id']:
-             msg['generated_document_id'] = str(msg['generated_document_id'])
+        # --- LÓGICA DE CONVERSÃO CORRIGIDA E MAIS ROBUSTA ---
+        # Itera sobre todas as chaves e valores do documento da mensagem
+        for key, value in msg.items():
+            # Se o valor for do tipo ObjectId, converte para string
+            if isinstance(value, ObjectId):
+                msg[key] = str(value)
+        
         messages.append(msg)
+    # --- FIM DA CORREÇÃO ---
         
     return jsonify(messages)
 
