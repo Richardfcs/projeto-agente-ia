@@ -17,16 +17,7 @@ def create_app():
     
     # --- CONFIGURAÇÃO DE CORS ---
     # Define de quais origens (URLs de frontend) aceitaremos requisições.
-    origins = [
-        "http://localhost:3000",
-        "https://agente-ia-squad42.onrender.com",
-        "https://test-tpf.netlify.app/",
-    ]
-    
-    # Aplica a configuração do CORS à aplicação inteira.
-    # `supports_credentials=True` é essencial para permitir que o frontend
-    # envie headers de autenticação (como nosso token JWT).
-    CORS(app, origins=origins, supports_credentials=True)
+    CORS(app, supports_credentials=True)
     
     jwt = JWTManager(app)
     
