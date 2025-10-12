@@ -115,6 +115,41 @@ Para testar o fluxo completo:
 2.  Use a rota `POST /api/auth/login` para obter um `access_token`.
 3.  Clique no botão **"Authorize"** no topo da página do Swagger e cole seu token no formato `Bearer <seu_token>`.
 4.  Agora você pode testar os endpoints protegidos, como o `POST /api/chat/conversations`.
+---
+
+### **Plano de Ação Futuros: Aprimoramento do Sistema de Agentes de IA**
+
+#### **Parte 1: Otimização e Segurança do Backend**
+
+*   **Tarefa 1: Implementar Paginação nas Listas de Arquivos.**
+    *   **Objetivo:** Garantir que a aplicação permaneça rápida e não sobrecarregue o servidor ou o navegador, mesmo quando um usuário possuir centenas ou milhares de documentos.
+    *   **Local de Ação:** Rotas da API que listam documentos e templates (`/documents`, `/templates`, `/documents/search`).
+
+*   **Tarefa 2: Acelerar a Busca de Documentos.**
+    *   **Objetivo:** Tornar a funcionalidade de busca de arquivos por nome significativamente mais rápida e eficiente, especialmente com um grande volume de dados.
+    *   **Local de Ação:** A query de busca na API (`/documents/search`) e a configuração do banco de dados MongoDB (criação de um índice de texto).
+
+*   **Tarefa 3: Adicionar Validação de Segurança no Upload.**
+    *   **Objetivo:** Aumentar a segurança da plataforma, impedindo o upload de tipos de arquivos não autorizados ou potencialmente maliciosos.
+    *   **Local de Ação:** Rotas da API responsáveis pelo upload de documentos e templates.
+
+
+#### **Parte 2: Melhoria na Qualidade da Geração de Documentos pela IA**
+
+*   **Tarefa 4: Refinar a Geração de Documentos Word (`.docx`).**
+    *   **Objetivo:** Eliminar o problema de parágrafos vazios e espaçamentos excessivos ("enters" extras) nos documentos gerados, resultando em arquivos com aparência mais limpa e profissional.
+    *   **Local de Ação:** Lógica de geração de arquivos e nos prompts de instrução para os agentes de IA.
+
+*   **Tarefa 5: Habilitar a Criação de Planilhas Estruturadas (`.xlsx`).**
+    *   **Objetivo:** Capacitar os agentes de IA a gerar dados que sejam corretamente separados em múltiplas colunas dentro de uma planilha Excel, superando a limitação atual de uma única coluna.
+    *   **Local de Ação:** Lógica de geração de arquivos e nos prompts de instrução específicos para criação de planilhas.
+
+
+#### **Parte 3: Simplificação da Integração e Experiência do Usuário (Frontend)**
+
+*   **Tarefa 6: Facilitar o Download de Documentos Gerados.**
+    *   **Objetivo:** Criar um mecanismo simples e direto para que a interface do frontend (React) possa oferecer um link de download funcional ao usuário, utilizando apenas o ID do documento que já é recebido na resposta do chat.
+    *   **Local de Ação:** Criação de uma nova rota na API de arquivos, projetada especificamente para este fim.
 
 ---
 *Este projeto foi desenvolvido pelo Squad 42.*
