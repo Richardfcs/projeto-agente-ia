@@ -212,7 +212,6 @@ def search_documents():
 
     db = get_db()
     
-    # --- INÍCIO DA LÓGICA DE PAGINAÇÃO ---
     try:
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
@@ -223,20 +222,24 @@ def search_documents():
         return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser maiores que zero"}), 400
 
     skip = (page - 1) * limit
-    # --- FIM DA LÓGICA DE PAGINAÇÃO ---
 
-    search_regex = re.compile(f".*{re.escape(query)}.*", re.IGNORECASE)
+    # --- INÍCIO DA MUDANÇA ---
+    # Removido: search_regex = re.compile(f".*{re.escape(query)}.*", re.IGNORECASE)
     
-    # O filtro agora inclui a busca por nome
+    # O filtro agora usa o operador $text para uma busca otimizada.
+    # O $search aceita a string de busca diretamente.
     query_filter = {
         "owner_id": ObjectId(current_user_id),
-        "filename": search_regex
+        "$text": {
+            "$search": query
+        }
     }
+    # --- FIM DA MUDANÇA ---
     
     # Conta o total de documentos que correspondem à BUSCA
     total_documents = db.documents.count_documents(query_filter)
 
-    # Busca a página de documentos
+    # A busca continua a mesma, mas agora usa o novo 'query_filter' otimizado
     docs_cursor = db.documents.find(query_filter).sort("created_at", -1).skip(skip).limit(limit)
 
     documents_list = []
