@@ -161,10 +161,14 @@ def processar_solicitacao_ia(message_id: str) -> str:
                         "   - Se o usuário não forneceu dados para um placeholder, inclua a chave no JSON com um valor vazio (ex: `\"placeholder_desconhecido\": \"\"` ou `\"lista_vazia\": []`). NUNCA omita uma chave que a ferramenta de inspeção encontrou.\n\n"
                         f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}"
                     ),
+                    # --- INÍCIO DA MUDANÇA CRÍTICA ---
                     expected_output=(
-                        "Um único bloco de código JSON finalizado. As chaves deste JSON devem corresponder "
-                        "exatamente aos placeholders retornados pela ferramenta `Inspetor de Placeholders de Template`."
+                        "Sua resposta final DEVE SER APENAS o bloco de código JSON, e NADA MAIS. "
+                        "NÃO inclua nenhuma palavra, explicação, ou marcadores de linguagem como 'json' ou ```json. "
+                        "A saída deve ser um JSON bruto, válido e diretamente parsável. "
+                        "Exemplo de formato esperado: {\"chave1\": \"valor1\", \"chave2\": [{\"subchave\": \"subvalor\"}]}"
                     ),
+                    # --- FIM DA MUDANÇA CRÍTICA ---
                     agent=analista
                 )
 
