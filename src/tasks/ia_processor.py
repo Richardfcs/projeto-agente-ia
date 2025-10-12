@@ -155,20 +155,34 @@ def processar_solicitacao_ia(message_id: str) -> str:
                         f"Sua missão é gerar um dicionário JSON completo para preencher o template '{template_name}'.\n"
                         "**PROCESSO OBRIGATÓRIO:**\n"
                         "1. **INSPECIONE:** Primeiro, use a ferramenta `Inspetor de Placeholders de Template` com o nome do template '{template_name}' para obter a lista exata de TODAS as variáveis que ele espera.\n"
-                        "2. **ANALISE E GERE:** Leia o histórico da conversa e a lista de placeholders que você obteve. Sua tarefa é criar um objeto JSON onde as **chaves são um espelho exato** dos placeholders encontrados. Para cada placeholder, gere o conteúdo apropriado com base na conversa.\n"
-                        "   - Se um placeholder for um loop (ex: `secoes` ou `itens`), crie uma lista de objetos.\n"
+                        "2. **ANALISE E GERE:** Leia o histórico da conversa e a lista de placeholders que você obteve. Sua tarefa é criar um objeto JSON onde as **chaves são um espelho exato** dos placeholders encontrados.\n\n"
+                        
+                        "**REGRAS DE ESTRUTURA CRÍTICAS:**\n"
+                        "- Para o placeholder `secoes`, você DEVE criar uma lista de objetos. Cada objeto nesta lista DEVE ter as chaves `titulo` e `conteudo`.\n"
+                        "- Dentro de cada objeto de seção, se houver subseções, a chave `subsecoes` também DEVE ser uma lista de objetos, e cada um desses objetos DEVE ter as chaves `titulo` e `conteudo`.\n"
+                        "- Para o placeholder `dados_coletados`, você DEVE criar uma lista de objetos. Cada objeto nesta lista DEVE ter as chaves `local`, `med_A`, e `med_B`.\n"
+                        "Exemplo de estrutura para `secoes`:\n"
+                        "\"secoes\": [\n"
+                        "  { \"titulo\": \"Título Principal 1\", \"conteudo\": \"Parágrafo da seção 1.\", \"subsecoes\": [] },\n"
+                        "  { \"titulo\": \"Título Principal 2\", \"conteudo\": \"Parágrafo da seção 2.\", \"subsecoes\": [ { \"titulo\": \"Sub-título 2.1\", \"conteudo\": \"Parágrafo da subseção.\" } ] }\n"
+                        "]\n\n"
+                        
+                        "Exemplo de estrutura para `dados_coletados`:\n"
+                        "\"dados_coletados\": [\n"
+                        "  { \"local\": \"Sensor X\", \"med_A\": \"10.5\", \"med_B\": \"25.2\" },\n"
+                        "  { \"local\": \"Sensor Y\", \"med_A\": \"11.2\", \"med_B\": \"24.9\" }\n"
+                        "]\n\n"
+                        
                         "   - Infira valores para campos como títulos e datas a partir do contexto.\n"
                         "   - Se o usuário não forneceu dados para um placeholder, inclua a chave no JSON com um valor vazio (ex: `\"placeholder_desconhecido\": \"\"` ou `\"lista_vazia\": []`). NUNCA omita uma chave que a ferramenta de inspeção encontrou.\n\n"
                         f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}"
                     ),
-                    # --- INÍCIO DA MUDANÇA CRÍTICA ---
                     expected_output=(
                         "Sua resposta final DEVE SER APENAS o bloco de código JSON, e NADA MAIS. "
                         "NÃO inclua nenhuma palavra, explicação, ou marcadores de linguagem como 'json' ou ```json. "
                         "A saída deve ser um JSON bruto, válido e diretamente parsável. "
-                        "Exemplo de formato esperado: {\"chave1\": \"valor1\", \"chave2\": [{\"subchave\": \"subvalor\"}]}"
+                        "Exemplo de formato esperado: {\"chave1\": \"valor1\", \"secoes\": [{\"titulo\": \"exemplo\", \"conteudo\": \"exemplo\"}]}"
                     ),
-                    # --- FIM DA MUDANÇA CRÍTICA ---
                     agent=analista
                 )
 
@@ -192,6 +206,26 @@ def processar_solicitacao_ia(message_id: str) -> str:
             extensao = _extrair_extensao_desejada(historico_texto)
             logger.info(f"Extensão de arquivo simples detectada: {extensao}")
 
+            if extensao == 'xlsx':
+                # Prompt especializado para planilhas
+                description_tarefa_escrita = (
+                    "Sua tarefa é gerar os dados para uma planilha Excel. "
+                    "Formate a saída como um texto simples, usando ponto e vírgula (;) como o único separador de colunas "
+                    "e uma nova linha (\\n) para cada linha da planilha. A primeira linha DEVE ser o cabeçalho das colunas.\n"
+                    "NÃO inclua nenhum texto explicativo, apenas os dados formatados.\n"
+                    "Exemplo de saída: 'Nome do Produto;Quantidade Vendida;Preço Unitário\\nLaptop Gamer;50;7500\\nMouse Sem Fio;200;150'\n\n"
+                    f"--- HISTÓRICO DA CONVERSA ---\n{historico_texto}"
+                )
+                expected_output_tarefa_escrita = "Um único bloco de texto formatado com ponto e vírgula como separador de colunas e novas linhas para as linhas, começando com o cabeçalho."
+            else:
+                # Prompt padrão para DOCX e PDF
+                description_tarefa_escrita = (
+                    "Escreva o conteúdo textual completo para o documento solicitado pelo usuário. "
+                    "Seja direto e evite criar linhas em branco ou parágrafos vazios desnecessários. "
+                    f"\n--- HISTÓRICO ---\n{historico_texto}"
+                )
+                expected_output_tarefa_escrita = "Um texto completo e bem formatado, sem linhas vazias extras, para o corpo do documento."
+                
             tarefa_escrita = Task(
                 description=(
                     "Escreva o conteúdo textual completo para o documento solicitado pelo usuário. "
@@ -202,6 +236,7 @@ def processar_solicitacao_ia(message_id: str) -> str:
                 expected_output="Um texto completo e bem formatado para o corpo do documento.",
                 agent=revisor
             )
+            
             tarefa_criacao = Task(
                 description=(
                     "Use a ferramenta 'SimpleDocumentGeneratorTool' para transformar o texto da tarefa anterior em um arquivo. "
