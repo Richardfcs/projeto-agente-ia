@@ -58,33 +58,31 @@ def criar_docx_stream(
 def criar_xlsx_stream(
     topicos: Optional[Iterable[Any]] = None,
     filename: str = "relatorio.xlsx",
-    title: str = "Relatório IA",  # SUGESTÃO: Adicionado parâmetro de título.
-    write_only: bool = False
+    title: str = "Relatório IA",
+    write_only: bool = False  # Mantendo o parâmetro para consistência
 ) -> io.BytesIO:
     """
     Cria XLSX em memória e retorna BytesIO.
-    title: Título da planilha (aba).
-    write_only: se True, usa modo write-only (mais eficiente para muitos registros).
+    Interpreta cada 'topico' como uma linha e separa as colunas pelo caractere ';'.
     """
     topicos = _normalize_topicos(topicos)
     stream = io.BytesIO()
     try:
-        if write_only:
-            wb = Workbook(write_only=True)
-            ws = wb.create_sheet(title=title)
-            for topico in topicos:
-                ws.append([topico])  # Perfeito para write-only.
-        else:
-            wb = Workbook()
-            ws = wb.active
+        wb = Workbook(write_only=write_only)
+        ws = wb.create_sheet(title=title) if write_only else wb.active
+        if not write_only:
             ws.title = title
-            for topico in topicos:
-                # SUGESTÃO: Usando .append() aqui para consistência com o modo write-only.
-                # É mais idiomático para adicionar linhas sequenciais.
-                ws.append([topico])
-            # Original:
-            # for i, topico in enumerate(topicos, start=1):
-            #     ws[f"A{i}"] = topico
+
+        for linha_texto in topicos:
+            # --- INÍCIO DA MUDANÇA ---
+            # Adiciona a linha apenas se ela tiver conteúdo real
+            if linha_texto and linha_texto.strip():
+                # Divide a linha de texto pelo separador para criar as colunas
+                colunas = [celula.strip() for celula in linha_texto.split(';')]
+                # O método .append() do openpyxl aceita uma lista e a distribui pelas colunas
+                ws.append(colunas)
+            # --- FIM DA MUDANÇA ---
+
         wb.save(stream)
         stream.seek(0)
         stream.name = filename

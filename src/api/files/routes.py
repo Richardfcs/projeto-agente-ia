@@ -89,40 +89,54 @@ def upload_template():
         "file_id": str(file_id)
     }), 201
 
-@files_bp.route('/files/<string:file_id>', methods=['GET'])
+@files_bp.route('/documents/<string:document_id>/download', methods=['GET'])
 @jwt_required()
-def download_file(file_id):
+def download_document_by_id(document_id):
+    """
+    Permite o download de um documento usando o ID do metadado (_id),
+    abstraindo o ID do GridFS para o frontend. Esta é a rota preferencial
+    para ser usada pela interface do usuário.
+    """
     current_user_id = get_jwt_identity()
     db = get_db()
     fs = get_gridfs()
 
     try:
-        oid = ObjectId(file_id)
+        # 1. Valida o ID do documento recebido na URL
+        doc_oid = ObjectId(document_id)
     except InvalidId:
-        return jsonify({"erro": "ID de arquivo inválido"}), 400
+        return jsonify({"erro": "ID de documento inválido"}), 400
 
-    doc_meta = db.documents.find_one({"gridfs_file_id": oid, "owner_id": ObjectId(current_user_id)})
-    template_meta = db.templates.find_one({"gridfs_file_id": oid})
+    # 2. Encontra o metadado do documento e, crucialmente, verifica se ele pertence ao usuário logado.
+    #    Esta é a verificação de segurança mais importante.
+    doc_meta = db.documents.find_one({
+        "_id": doc_oid, 
+        "owner_id": ObjectId(current_user_id)
+    })
 
-    if not doc_meta and not template_meta:
-        return jsonify({"erro": "Arquivo não encontrado ou acesso negado"}), 404
+    if not doc_meta:
+        # Se não encontrar, retorna 404, seja porque o documento não existe ou por falta de permissão.
+        return jsonify({"erro": "Documento não encontrado ou acesso negado"}), 404
+
+    # 3. Obtém o ID do GridFS a partir do metadado encontrado
+    gridfs_id = doc_meta.get("gridfs_file_id")
+    if not gridfs_id:
+        # Caso de segurança para dados inconsistentes no banco
+        return jsonify({"erro": "Metadado do documento está corrompido (sem ID de arquivo)"}), 500
 
     try:
-        gridfs_file = fs.get(oid)
+        # 4. Usa o ID do GridFS para buscar o arquivo real no sistema de armazenamento
+        gridfs_file = fs.get(gridfs_id)
         
-        ## MELHORIA (Desempenho): Evite carregar o arquivo inteiro na memória.
-        # O objeto 'gridfs_file' já é um stream. Passe-o diretamente para o send_file
-        # para que o Flask faça o streaming do arquivo em pedaços (chunks).
-        # Isso economiza muita memória em arquivos grandes.
-        # Original: file_stream = io.BytesIO(gridfs_file.read())
-        
+        # 5. Envia o arquivo como um stream para o cliente, forçando o download.
+        #    Passar o objeto 'gridfs_file' diretamente é a forma mais eficiente em termos de memória.
         return send_file(
             gridfs_file,
-            download_name=gridfs_file.filename,
-            as_attachment=True
+            download_name=gridfs_file.filename, # Garante o nome original do arquivo
+            as_attachment=True # Força o navegador a abrir a caixa de diálogo "Salvar como..."
         )
     except NoFile:
-        return jsonify({"erro": "Arquivo não encontrado no sistema de armazenamento"}), 404
+        return jsonify({"erro": "Arquivo não encontrado no sistema de armazenamento (GridFS)"}), 404
 
 @files_bp.route('/documents', methods=['GET'])
 @jwt_required()
@@ -212,7 +226,6 @@ def search_documents():
 
     db = get_db()
     
-    # --- INÍCIO DA LÓGICA DE PAGINAÇÃO ---
     try:
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 20))
@@ -223,20 +236,24 @@ def search_documents():
         return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser maiores que zero"}), 400
 
     skip = (page - 1) * limit
-    # --- FIM DA LÓGICA DE PAGINAÇÃO ---
 
-    search_regex = re.compile(f".*{re.escape(query)}.*", re.IGNORECASE)
+    # --- INÍCIO DA MUDANÇA ---
+    # Removido: search_regex = re.compile(f".*{re.escape(query)}.*", re.IGNORECASE)
     
-    # O filtro agora inclui a busca por nome
+    # O filtro agora usa o operador $text para uma busca otimizada.
+    # O $search aceita a string de busca diretamente.
     query_filter = {
         "owner_id": ObjectId(current_user_id),
-        "filename": search_regex
+        "$text": {
+            "$search": query
+        }
     }
+    # --- FIM DA MUDANÇA ---
     
     # Conta o total de documentos que correspondem à BUSCA
     total_documents = db.documents.count_documents(query_filter)
 
-    # Busca a página de documentos
+    # A busca continua a mesma, mas agora usa o novo 'query_filter' otimizado
     docs_cursor = db.documents.find(query_filter).sort("created_at", -1).skip(skip).limit(limit)
 
     documents_list = []

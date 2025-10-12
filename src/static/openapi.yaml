@@ -34,7 +34,7 @@ tags:
 
 paths:
   # ===================================================================
-  # Authentication
+  # Authentication (Sem alterações nesta seção)
   # ===================================================================
   /api/auth/register:
     post:
@@ -55,7 +55,7 @@ paths:
                   example: "João da Silva"
                 email:
                   type: string
-                  format: email # Especifica que este campo é um email
+                  format: email
                   example: "joao.silva@email.com"
                 password:
                   type: string
@@ -73,7 +73,7 @@ paths:
                     type: string
                     example: "Usuário registrado com sucesso!"
         '400':
-          description: Dados de entrada inválidos ou faltando, ou formato de email incorreto.
+          description: Dados de entrada inválidos ou faltando.
         '409':
           description: O email fornecido já está em uso.
 
@@ -111,13 +111,13 @@ paths:
                     type: string
                     example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
         '401':
-          description: Credenciais inválidas (email ou senha incorretos).
+          description: Credenciais inválidas.
   
   /api/auth/profile:
     get:
       tags: [Authentication]
       summary: Obter informações do perfil do usuário logado
-      description: Retorna os dados do usuário associado ao token JWT fornecido no header de autorização.
+      description: Retorna os dados do usuário associado ao token JWT.
       security:
         - bearerAuth: [] 
       responses:
@@ -139,12 +139,12 @@ paths:
                     format: email
                     example: "joao.silva@email.com"
         '401':
-          description: Não autorizado. O token JWT está faltando, é inválido ou expirou.
+          description: Não autorizado.
         '404':
-          description: Usuário não encontrado no banco de dados.
+          description: Usuário não encontrado.
 
   # ===================================================================
-  # Conversations & Chat
+  # Conversations & Chat (Sem alterações nesta seção)
   # ===================================================================
   /api/chat/conversations:
     post:
@@ -258,7 +258,7 @@ paths:
           description: Mensagem não encontrada.
 
   # ===================================================================
-  # Documents & Files
+  # Documents & Files (Alterações importantes nesta seção)
   # ===================================================================
   /api/documents/upload:
     post:
@@ -278,28 +278,139 @@ paths:
   /api/documents:
     get:
       tags: [Documents & Files]
-      summary: Listar documentos do usuário
+      summary: Listar documentos do usuário (com paginação)
+      ### MUDANÇA 1: Adicionados parâmetros de paginação ###
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: "O número da página a ser retornada."
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: "O número de itens por página."
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: Lista de metadados dos documentos.
+          description: Uma lista paginada de metadados dos documentos.
+          ### MUDANÇA 2: Resposta agora é um objeto com 'data' e 'pagination' ###
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id: { type: string }
+                        filename: { type: string }
+                        owner_id: { type: string }
+                        created_at: { type: string, format: date-time }
+                  pagination:
+                    type: object
+                    properties:
+                      total_items: { type: integer }
+                      total_pages: { type: integer }
+                      current_page: { type: integer }
+                      items_per_page: { type: integer }
         '401':
           description: Não autorizado.
   
   /api/documents/search:
     get:
       tags: [Documents & Files]
-      summary: Buscar documentos por nome
-      parameters: [{name: q, in: query, required: true, schema: {type: string}}]
+      summary: Buscar documentos por nome (otimizado e com paginação)
+      ### MUDANÇA 3: Adicionados parâmetros de paginação ###
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: "O termo de busca para o nome do arquivo."
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: "O número da página a ser retornada."
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: "O número de itens por página."
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: Resultado da busca de documentos.
+          description: O resultado paginado da busca de documentos.
+          ### MUDANÇA 4: Resposta agora é um objeto com 'data' e 'pagination' ###
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id: { type: string }
+                        filename: { type: string }
+                        owner_id: { type: string }
+                        created_at: { type: string, format: date-time }
+                  pagination:
+                    type: object
+                    properties:
+                      total_items: { type: integer }
+                      total_pages: { type: integer }
+                      current_page: { type: integer }
+                      items_per_page: { type: integer }
         '401':
           description: Não autorizado.
+
+  ### MUDANÇA 5: Adicionada a nova rota de download recomendada ###
+  /api/documents/{document_id}/download:
+    get:
+      tags: [Documents & Files]
+      summary: Fazer download de um documento (Recomendado)
+      description: Baixa um documento usando o ID do metadado (`_id`), que é retornado pela API de chat. Este é o método preferencial para o frontend.
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          description: "O ID do metadado do documento a ser baixado."
+          schema:
+            type: string
+      responses:
+        '200':
+          description: O arquivo do documento para download.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: O ID do documento fornecido é inválido.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Documento não encontrado ou acesso negado.
 
   /api/files/{gridfs_file_id}:
     get:
       tags: [Documents & Files]
-      summary: Fazer download de um arquivo
+      ### MUDANÇA 6: Atualizado sumário e descrição para clarificar o uso ###
+      summary: Fazer download de um arquivo (por GridFS ID)
+      description: "Este endpoint baixa um arquivo usando o ID interno do GridFS. **Recomendação:** Use o novo endpoint `/documents/{document_id}/download` para uma integração mais simples com o frontend."
       parameters: [{name: gridfs_file_id, in: path, required: true, schema: {type: string}}]
       responses:
         '200':
@@ -361,9 +472,47 @@ paths:
   /api/templates:
     get:
       tags: [Templates]
-      summary: Listar todos os templates disponíveis
+      summary: Listar todos os templates disponíveis (com paginação)
+      ### MUDANÇA 7: Adicionados parâmetros de paginação ###
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: "O número da página a ser retornada."
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: "O número de itens por página."
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
-          description: Lista de metadados de templates.
+          description: Uma lista paginada de metadados de templates.
+          ### MUDANÇA 8: Resposta agora é um objeto com 'data' e 'pagination' ###
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        _id: { type: string }
+                        filename: { type: string }
+                        uploaded_by: { type: string }
+                        created_at: { type: string, format: date-time }
+                  pagination:
+                    type: object
+                    properties:
+                      total_items: { type: integer }
+                      total_pages: { type: integer }
+                      current_page: { type: integer }
+                      items_per_page: { type: integer }
         '401':
           description: Não autorizado.

@@ -31,6 +31,35 @@ def _to_objectid_if_possible(value: Any) -> Any:
     except (InvalidId, TypeError):
         return value
 
+# --- NOVA FUNÇÃO AUXILIAR DE LIMPEZA ---
+def _limpar_contexto_vazio(contexto: Any) -> Any:
+    """
+    Função recursiva para limpar um dicionário de contexto.
+    - Converte strings vazias ou com apenas espaços para None.
+    - Remove itens None de listas.
+    - Funciona com dicionários, listas, strings e outros tipos.
+    """
+    if isinstance(contexto, str):
+        # Se for uma string e estiver "vazia", retorna None.
+        return contexto if contexto.strip() else None
+        
+    if isinstance(contexto, list):
+        # Se for uma lista, processa cada item e filtra os resultados que se tornaram None.
+        lista_limpa = [_limpar_contexto_vazio(item) for item in contexto]
+        return [item for item in lista_limpa if item is not None]
+        
+    if isinstance(contexto, dict):
+        # Se for um dicionário, processa cada valor.
+        # Mantém a chave mesmo que o valor se torne None (Jinja2 lida bem com isso).
+        dict_limpo = {}
+        for chave, valor in contexto.items():
+            dict_limpo[chave] = _limpar_contexto_vazio(valor)
+        return dict_limpo
+        
+    # Para qualquer outro tipo de dado (números, booleanos, etc.), retorna como está.
+    return contexto
+# --- FIM DA NOVA FUNÇÃO ---
+
 # ---------------- FileReaderTool ----------------
 class FileReaderInput(BaseModel):
     document_id: str = Field(description="O ID do metadado do documento a ser lido.")
@@ -109,7 +138,14 @@ class TemplateFillerTool(BaseTool):
             template_file = fs.get(gridfs_id)
 
             doc = DocxTemplate(template_file)
-            doc.render(context)
+            
+            # --- INÍCIO DA MUDANÇA ---
+            # Antes de renderizar, limpamos o contexto gerado pela IA.
+            contexto_limpo = _limpar_contexto_vazio(context)
+            logger.info("Contexto após limpeza: %s", contexto_limpo)
+            
+            doc.render(contexto_limpo)
+            # --- FIM DA MUDANÇA ---
 
             final_doc_stream = io.BytesIO()
             doc.save(final_doc_stream)
