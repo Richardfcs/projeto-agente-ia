@@ -130,14 +130,28 @@ def list_documents():
     current_user_id = get_jwt_identity()
     db = get_db()
     
-    ## SUGESTÃO (Escalabilidade): Implementar paginação para evitar sobrecarga.
-    # Ex: page = request.args.get('page', 1, type=int)
-    # Ex: limit = request.args.get('limit', 20, type=int)
-    # Ex: .skip((page - 1) * limit).limit(limit)
+    # --- INÍCIO DA LÓGICA DE PAGINAÇÃO ---
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser números inteiros"}), 400
+
+    if page < 1 or limit < 1:
+        return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser maiores que zero"}), 400
+        
+    # Calcula quantos documentos pular
+    skip = (page - 1) * limit
     
-    docs_cursor = db.documents.find(
-        {"owner_id": ObjectId(current_user_id)}
-    ).sort("created_at", -1)
+    # Define o filtro da busca
+    query_filter = {"owner_id": ObjectId(current_user_id)}
+    
+    # Conta o número total de documentos que correspondem ao filtro (essencial para o frontend)
+    total_documents = db.documents.count_documents(query_filter)
+    
+    # Busca a página de documentos
+    docs_cursor = db.documents.find(query_filter).sort("created_at", -1).skip(skip).limit(limit)
+    # --- FIM DA LÓGICA DE PAGINAÇÃO ---
 
     documents_list = []
     for doc in docs_cursor:
@@ -146,7 +160,17 @@ def list_documents():
         doc['gridfs_file_id'] = str(doc['gridfs_file_id'])
         documents_list.append(doc)
         
-    return jsonify(documents_list)
+    # --- NOVA ESTRUTURA DE RESPOSTA ---
+    # A resposta agora é um objeto que contém os dados e as informações de paginação
+    return jsonify({
+        "data": documents_list,
+        "pagination": {
+            "total_items": total_documents,
+            "total_pages": (total_documents + limit - 1) // limit, # Cálculo para arredondar para cima
+            "current_page": page,
+            "items_per_page": limit
+        }
+    })
 
 @files_bp.route('/documents/<string:document_id>', methods=['DELETE'])
 @jwt_required()
@@ -188,19 +212,32 @@ def search_documents():
 
     db = get_db()
     
-    ## MELHORIA (Desempenho): A busca com regex pode ser lenta.
-    # Para uma melhor performance, crie um índice de texto no campo 'filename' no MongoDB
-    # e use a busca por texto.
-    # 1. Crie o índice (apenas uma vez): `db.documents.create_index([("filename", "text")])`
-    # 2. Mude a query para: `{"owner_id": ObjectId(current_user_id), "$text": {"$search": query}}`
-    # A query atual funciona, mas não escala bem.
+    # --- INÍCIO DA LÓGICA DE PAGINAÇÃO ---
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser números inteiros"}), 400
+    
+    if page < 1 or limit < 1:
+        return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser maiores que zero"}), 400
+
+    skip = (page - 1) * limit
+    # --- FIM DA LÓGICA DE PAGINAÇÃO ---
+
     search_regex = re.compile(f".*{re.escape(query)}.*", re.IGNORECASE)
     
-    ## SUGESTÃO (Escalabilidade): Adicione paginação aqui também.
-    docs_cursor = db.documents.find({
+    # O filtro agora inclui a busca por nome
+    query_filter = {
         "owner_id": ObjectId(current_user_id),
         "filename": search_regex
-    }).sort("created_at", -1)
+    }
+    
+    # Conta o total de documentos que correspondem à BUSCA
+    total_documents = db.documents.count_documents(query_filter)
+
+    # Busca a página de documentos
+    docs_cursor = db.documents.find(query_filter).sort("created_at", -1).skip(skip).limit(limit)
 
     documents_list = []
     for doc in docs_cursor:
@@ -209,7 +246,16 @@ def search_documents():
         doc['gridfs_file_id'] = str(doc['gridfs_file_id'])
         documents_list.append(doc)
         
-    return jsonify(documents_list)
+    # --- NOVA ESTRUTURA DE RESPOSTA ---
+    return jsonify({
+        "data": documents_list,
+        "pagination": {
+            "total_items": total_documents,
+            "total_pages": (total_documents + limit - 1) // limit,
+            "current_page": page,
+            "items_per_page": limit
+        }
+    })
 
 @files_bp.route('/documents/<string:document_id>/rename', methods=['PUT'])
 @jwt_required()
@@ -250,8 +296,26 @@ def rename_document(document_id):
 @jwt_required()
 def list_templates():
     db = get_db()
-    templates_cursor = db.templates.find({}).sort("filename", 1)
     
+    # --- INÍCIO DA LÓGICA DE PAGINAÇÃO ---
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser números inteiros"}), 400
+        
+    if page < 1 or limit < 1:
+        return jsonify({"erro": "Parâmetros 'page' e 'limit' devem ser maiores que zero"}), 400
+
+    skip = (page - 1) * limit
+    
+    query_filter = {} # Sem filtro específico para templates
+    
+    total_templates = db.templates.count_documents(query_filter)
+    
+    templates_cursor = db.templates.find(query_filter).sort("filename", 1).skip(skip).limit(limit)
+    # --- FIM DA LÓGICA DE PAGINAÇÃO ---
+
     templates_list = []
     for t in templates_cursor:
         t['_id'] = str(t['_id'])
@@ -259,4 +323,13 @@ def list_templates():
         t['gridfs_file_id'] = str(t['gridfs_file_id'])
         templates_list.append(t)
         
-    return jsonify(templates_list)
+    # --- NOVA ESTRUTURA DE RESPOSTA ---
+    return jsonify({
+        "data": templates_list,
+        "pagination": {
+            "total_items": total_templates,
+            "total_pages": (total_templates + limit - 1) // limit,
+            "current_page": page,
+            "items_per_page": limit
+        }
+    })
