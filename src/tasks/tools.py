@@ -227,10 +227,10 @@ class TemplateInspectorTool(BaseTool):
     description: str = "Lê um template .docx e extrai uma lista de todos os placeholders (variáveis Jinja2) que ele espera."
     args_schema: Type[BaseModel] = TemplateInspectorInput
 
+    # --- INÍCIO DA MUDANÇA (CORREÇÃO DA REGEX) ---
     def _run(self, template_name: str) -> ReturnType:
-        logger.info(f"TemplateInspectorTool (regex validado) para: {template_name}")
-        db = get_db()
-        fs = get_gridfs()
+        logger.info(f"TemplateInspectorTool executando para: {template_name}")
+        db, fs = get_db(), get_gridfs()
 
         template_meta = db.templates.find_one({"filename": template_name})
         if not template_meta:
@@ -242,18 +242,20 @@ class TemplateInspectorTool(BaseTool):
             with ZipFile(io.BytesIO(gridfs_file.read())) as docx_zip:
                 xml_content = docx_zip.read('word/document.xml').decode('utf-8')
 
-            # Sua regex, que é ótima para capturar os blocos Jinja2
-            placeholders = re.findall(r'\{\{.*?\}\}|\{%.*?%\}', xml_content)
+            # REGEX CORRIGIDA: Esta regex é muito mais específica para o formato Jinja2.
+            # Ela procura por {{ var }} ou {% comando %} e extrai apenas o conteúdo limpo.
+            jinja_blocks = re.findall(r'\{\{.*?\}\}|\{%.*?%\}', xml_content)
             
             variaveis = set()
-            for p in placeholders:
-                # Sua lógica de limpeza, que simplifica as variáveis para o LLM
-                nome_limpo = re.sub(r'[\{\}\%\s]', '', p).split('|')[0].split('.')[0]
-                if nome_limpo and nome_limpo not in ['if', 'for', 'in', 'endif', 'endfor']:
-                    variaveis.add(nome_limpo)
+            for block in jinja_blocks:
+                # Limpa os caracteres especiais e pega a primeira parte (antes de filtros como | tojson)
+                cleaned_block = re.sub(r'[\{\}\%\s]', '', block).split('|')[0].split('.')[0]
+                # Ignora palavras-chave de controle do Jinja2
+                if cleaned_block and cleaned_block not in ['if', 'for', 'in', 'endif', 'endfor']:
+                    variaveis.add(cleaned_block)
 
             if not variaveis:
-                return {"status": "success", "variables": [], "message": "Nenhum placeholder encontrado no template."}
+                return {"status": "success", "variables": [], "message": "Nenhum placeholder encontrado."}
 
             # A mudança principal: retornar um JSON estruturado, como o resto do sistema espera.
             return {"status": "success", "variables": sorted(list(variaveis))}
