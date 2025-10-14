@@ -96,48 +96,30 @@ def _ensure_agents() -> Dict[str, Any]:
 # --- INÍCIO DA MUDANÇA FINAL (ROTEADOR INTELIGENTE) ---
 
 def _rotear_intencao_hibrido(historico_cursor_list: List[Dict[str, Any]]) -> str:
-    """
-    Roteador híbrido que usa regras rápidas primeiro e recorre à IA como fallback.
-    """
-    if not historico_cursor_list:
-        return 'CONVERSA_GERAL'
-    
+    """ Roteador simplificado e mais preciso. """
     ultima_mensagem_obj = next((msg for msg in reversed(historico_cursor_list) if msg.get('role') == 'user'), None)
-    if not ultima_mensagem_obj:
-        return 'CONVERSA_GERAL'
-        
-    ultima_mensagem_texto = ultima_mensagem_obj.get('content', '').lower()
+    if ultima_mensagem_obj:
+        ultima_mensagem_texto = ultima_mensagem_obj.get('content', '').lower()
 
-    # REGRA 1 (ALTA PRIORIDADE): Se o usuário confirmar uma pergunta do assistente sobre usar um template.
-    if len(historico_cursor_list) > 1:
-        penultima_mensagem = historico_cursor_list[-2]
-        if penultima_mensagem.get('role') == 'assistant' and 'quer que eu use o template' in penultima_mensagem.get('content', '').lower():
-            if any(confirmacao in ultima_mensagem_texto for confirmacao in ['sim', 'exatamente', 'isso', 'pode fazer', 'faça isso', 'positivo']):
-                template_match = re.search(r"`([\w\d_-]+\.docx?)`", penultima_mensagem.get('content', ''))
-                if template_match:
-                    logger.info("Roteador Híbrido: Intenção 'PREENCHER_TEMPLATE' detectada por confirmação do usuário.")
-                    # Injeta o nome do template na mensagem do usuário para que a extração funcione perfeitamente.
-                    ultima_mensagem_obj['content'] += f" (confirmado o uso do template '{template_match.group(1)}')"
-                    return 'PREENCHER_TEMPLATE'
+        # REGRA 1 (LER): Prioridade máxima para intenção de leitura
+        palavras_chave_leitura = ['leia', 'o que tem em', 'o que há em', 'qual o conteúdo de', 'extraia as informações de']
+        if any(keyword in ultima_mensagem_texto for keyword in palavras_chave_leitura) and '.docx' in ultima_mensagem_texto:
+            logger.info("Roteador: Intenção 'LER_DOCUMENTO' detectada por regra.")
+            return 'LER_DOCUMENTO'
 
-    # REGRA 2: Se o usuário mencionar explicitamente um nome de arquivo de template.
-    if re.search(r"\'([\w\d_-]+\.docx?)\'|\"([\w\d_-]+\.docx?)\"", ultima_mensagem_texto):
-        logger.info("Roteador Híbrido: Intenção 'PREENCHER_TEMPLATE' detectada por nome de arquivo.")
-        return 'PREENCHER_TEMPLATE'
-    
-    # REGRA 3: Se o usuário pedir explicitamente para criar um documento.
-    if any(keyword in ultima_mensagem_texto for keyword in ['crie um documento', 'gere um relatório', 'faça um arquivo', 'crie uma planilha']):
-        logger.info("Roteador Híbrido: Intenção 'CRIAR_DOCUMENTO_SIMPLES' detectada por palavra-chave.")
-        return 'CRIAR_DOCUMENTO_SIMPLES'
-    
-    if ultima_mensagem_obj.get('input_document_id'):
-        logger.info("Roteador Híbrido: Intenção 'LER_DOCUMENTO' detectada por regra (anexo).")
-        return 'LER_DOCUMENTO'
-        
-    # Camada 2: Lógica Baseada em IA (Fallback Poderoso)
-    logger.info("Roteador Híbrido: Nenhuma regra correspondeu. Escalando para classificação por IA.")
+        # REGRA 2 (PREENCHER): Procura por intenção de preenchimento
+        palavras_chave_preenchimento = ['use o template', 'preencha o template', 'no template']
+        if any(keyword in ultima_mensagem_texto for keyword in palavras_chave_preenchimento) and '.docx' in ultima_mensagem_texto:
+            logger.info("Roteador: Intenção 'PREENCHER_TEMPLATE' detectada por regra.")
+            return 'PREENCHER_TEMPLATE'
+
+    # Se nenhuma regra de alta prioridade foi acionada, a IA decide o resto.
+    logger.info("Roteador: Nenhuma regra de alta prioridade. Escalando para classificação por IA.")
     historico_texto = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in historico_cursor_list])
-    return _classificar_intencao_por_ia(historico_texto)
+    
+    agents = _ensure_agents(); gerente = agents["gerente"]
+    task = Task(description=f"Classifique a intenção da última mensagem (CRIAR_DOCUMENTO_SIMPLES ou CONVERSA_GERAL) com base no histórico:\n{historico_texto}", expected_output="Apenas a string da categoria.", agent=gerente)
+    crew = Crew(agents=[gerente], tasks=[task], verbose=0); return str(crew.kickoff()).strip()
 
 def _classificar_intencao_por_ia(historico_texto: str) -> str:
     """
@@ -247,6 +229,44 @@ def processar_solicitacao_ia(message_id: str) -> str:
                 tasks = [tarefa_extracao_dados, tarefa_preenchimento, tarefa_revisao_final]
                 crew_agents = [analista, especialista_doc, revisor]
 
+        elif intencao == 'LER_DOCUMENTO':
+            # Extrai o nome do arquivo da mensagem
+            doc_name_match = re.search(r"\'?([\w\d_-]+\.docx)\'?", historico_texto, re.IGNORECASE)
+            if not doc_name_match:
+                intencao = 'CONVERSA_GERAL' # Fallback se não encontrar o nome do arquivo
+            else:
+                doc_name = doc_name_match.group(1)
+                logger.info(f"Documento a ser lido: {doc_name}")
+
+                # Encontra o ID do documento no banco de dados
+                # NOTA: Esta busca assume que o nome do arquivo é único para o usuário.
+                # Uma busca mais robusta usaria o contexto para encontrar o ID exato.
+                document_meta = db.documents.find_one({"filename": doc_name, "owner_id": ObjectId(user_id)})
+                if not document_meta:
+                    # Se não encontrar, o revisor vai lidar com o erro de forma amigável
+                    historico_texto += f"\n\nsystem: O usuário pediu para ler o documento '{doc_name}', mas ele não foi encontrado no banco de dados."
+                    intencao = 'CONVERSA_GERAL'
+                else:
+                    document_id_to_read = str(document_meta['_id'])
+                    
+                    # Tarefa para o especialista ler o arquivo
+                    tarefa_leitura = Task(
+                        description=f"Use a ferramenta `FileReaderTool` para ler o conteúdo do documento com o ID '{document_id_to_read}'.",
+                        expected_output="O resultado da ferramenta FileReaderTool, contendo o conteúdo do arquivo.",
+                        agent=especialista_doc
+                    )
+                    
+                    # Tarefa para o revisor resumir e apresentar o conteúdo
+                    tarefa_apresentacao = Task(
+                        description="Analise o conteúdo extraído da tarefa anterior e apresente-o de forma clara e resumida para o usuário.",
+                        expected_output="Um resumo em texto simples do conteúdo do documento.",
+                        agent=revisor,
+                        context=[tarefa_leitura]
+                    )
+                    
+                    tasks = [tarefa_leitura, tarefa_apresentacao]
+                    crew_agents = [especialista_doc, revisor]
+
         if intencao == 'CRIAR_DOCUMENTO_SIMPLES':
             # Esta seção lida com a criação de documentos a partir do zero
             extensao = _extrair_extensao_desejada(historico_texto)
@@ -264,12 +284,13 @@ def processar_solicitacao_ia(message_id: str) -> str:
             # Esta seção lida com todas as outras interações
             tarefa_conversa = Task(
                 description=(
-                    "Sua tarefa é responder à ÚLTIMA MENSAGEM DO USUÁRIO. Use o histórico para dar uma resposta coerente e útil. "
-                    "Se o usuário fizer um pedido criativo (piada, poema, etc.), ATENDA O PEDIDO. "
-                    "Se o usuário confirmar que quer usar um template sem dizer o nome, instrua-o a fazer um novo pedido claro, por exemplo: 'Entendido. Por favor, envie uma nova mensagem dizendo: `Use o template 'TEMPLATE_TPF.docx' para...`'.\n\n"
-                    f"--- HISTÓRICO ---\n{historico_texto}"
+                    "Sua tarefa é ser um assistente de IA útil e responder à ÚLTIMA MENSAGEM DO USUÁRIO de forma coerente.\n\n"
+                    "**CENÁRIO 1 (PEDIDO CRIATIVO):** Se a última mensagem do usuário for um pedido criativo (piada, poema, resumo), ATENDA O PEDIDO diretamente.\n\n"
+                    "**CENÁRIO 2 (CONFIRMAÇÃO DE TEMPLATE):** Se o histórico mostra que a sua última resposta foi uma pergunta de confirmação para usar um template (ex: 'Você quer que eu use o template...?') e a última mensagem do usuário é uma resposta afirmativa (ex: 'sim', 'exatamente', 'isso mesmo'), sua ÚNICA tarefa é instruir o usuário sobre o próximo passo. Responda de forma clara: 'Ótimo! Para que eu possa criar o documento, por favor, envie uma nova mensagem com o comando completo, por exemplo: `Use o template 'TEMPLATE_TPF.docx' para criar um documento sobre energias renováveis.`'.\n\n"
+                    "**CENÁRIO 3 (OUTRAS PERGUNTAS):** Para todas as outras perguntas, responda da melhor forma possível. Se a pergunta for sobre quais templates existem, use a ferramenta `TemplateListerTool` para responder.\n\n"
+                    f"--- HISTÓRICO COMPLETO DA CONVERSA ---\n{historico_texto}"
                 ),
-                expected_output="A resposta final, em texto, para o usuário.",
+                expected_output="A resposta final em texto para o usuário.",
                 agent=revisor
             )
             tasks = [tarefa_conversa]
