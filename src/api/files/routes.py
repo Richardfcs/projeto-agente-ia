@@ -138,6 +138,37 @@ def download_document_by_id(document_id):
     except NoFile:
         return jsonify({"erro": "Arquivo não encontrado no sistema de armazenamento (GridFS)"}), 404
 
+@files_bp.route('/documents/<string:document_id>/metadata', methods=['GET'])
+@jwt_required()
+def get_document_metadata(document_id):
+    """
+    Retorna apenas os metadados de um documento específico.
+    """
+    current_user_id = get_jwt_identity()
+    db = get_db()
+
+    try:
+        doc_oid = ObjectId(document_id)
+    except InvalidId:
+        return jsonify({"erro": "ID de documento inválido"}), 400
+
+    doc_meta = db.documents.find_one({
+        "_id": doc_oid,
+        "owner_id": ObjectId(current_user_id)
+    })
+
+    if not doc_meta:
+        return jsonify({"erro": "Documento não encontrado ou acesso negado"}), 404
+    
+    # Prepara os dados para serem enviados como JSON
+    doc_meta['_id'] = str(doc_meta['_id'])
+    doc_meta['owner_id'] = str(doc_meta['owner_id'])
+    doc_meta['gridfs_file_id'] = str(doc_meta['gridfs_file_id'])
+    if 'created_at' in doc_meta:
+        doc_meta['created_at'] = doc_meta['created_at'].isoformat()
+        
+    return jsonify(doc_meta)
+
 @files_bp.route('/documents', methods=['GET'])
 @jwt_required()
 def list_documents():

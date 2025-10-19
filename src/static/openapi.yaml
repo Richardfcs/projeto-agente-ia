@@ -404,6 +404,49 @@ paths:
           description: Não autorizado.
         '404':
           description: Documento não encontrado ou acesso negado.
+  
+  /api/documents/{document_id}/metadata:
+    get:
+      tags: [Documents & Files]
+      summary: Obter os metadados de um documento
+      description: Retorna as informações (metadados) de um único documento, como o nome do arquivo, data de criação, etc. Ideal para obter o nome do arquivo antes de iniciar um download.
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          description: "O ID do metadado do documento a ser consultado."
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Metadados do documento retornados com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  _id:
+                    type: string
+                    example: "68ee3e097750ce0bf3328ab3"
+                  filename:
+                    type: string
+                    example: "poema.docx"
+                  owner_id:
+                    type: string
+                    example: "68db353c9f52df9bf51c7914"
+                  gridfs_file_id:
+                    type: string
+                    example: "68ee3e097750ce0bf3328ab2"
+                  created_at:
+                    type: string
+                    format: date-time
+                    example: "2025-10-14T15:30:00Z"
+        '400':
+          description: O ID do documento fornecido é inválido.
+        '401':
+          description: Não autorizado.
+        '404':
+          description: Documento não encontrado ou acesso negado.
 
   /api/files/{gridfs_file_id}:
     get:
