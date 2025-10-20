@@ -1,8 +1,8 @@
-# /src/tasks/tools.py (revisado)
+# /src/tasks/tools.py 
 import io
 import json
-import re # Importar a biblioteca de regex
-from zipfile import ZipFile # Importar ZipFile
+import re 
+from zipfile import ZipFile
 from datetime import datetime
 from typing import Type, Optional, Dict, Any
 from src.utils.docx_placeholders import extract_placeholders_from_docx_bytes
@@ -220,9 +220,6 @@ class TemplateFillerTool(BaseTool):
             # Limpeza do contexto recebido (remove strings vazias, None -> None)
             contexto_limpo = _normalizar_contexto(context) or {}
 
-            # Verifica top-level required
-            # missing_top = [k for k in required_top_level if k not in contexto_limpo or contexto_limpo.get(k) in (None, "")]
-
             # Validação de coleções (se o template espera 'secoes' ou 'dados_coletados', eles devem ser listas)
             collection_type_errors = []
             for col in collections:
@@ -232,46 +229,6 @@ class TemplateFillerTool(BaseTool):
                     continue
                 if not isinstance(val, list):
                     collection_type_errors.append({"collection": col, "reason": "expected list", "actual_type": type(val).__name__})
-
-            # # Validação básica de itens nas coleções: se temos dotted fields como 'secao.titulo' -> cada item in 'secoes' deve ser dict com 'titulo'
-            # nested_key_errors = []
-            # for dotted_field in dotted:
-            #     if '.' not in dotted_field:
-            #         continue
-            #     base, subkey = dotted_field.split('.', 1)
-            #     if base in contexto_limpo:
-            #         val = contexto_limpo.get(base)
-            #         if isinstance(val, list) and len(val) > 0:
-            #             # verifica apenas o primeiro item (sanity check)
-            #             first = val[0]
-            #             if not isinstance(first, dict) or subkey not in first:
-            #                 nested_key_errors.append({"collection": base, "missing_in_item": subkey})
-            #         else:
-            #             # se não é lista, será reportado em collection_type_errors or missing_top
-            #             pass
-
-            # # Se houver problemas, retorne erro estruturado com expected_structure amostral
-            # if missing_top or collection_type_errors or nested_key_errors:
-            #     expected_sample = {}
-            #     for k in required_top_level:
-            #         if k in collections:
-            #             expected_sample[k] = [{"...": "..."}]  # indica lista de dicts
-            #         else:
-            #             expected_sample[k] = "string_or_value_example"
-
-            #     error_data = {
-            #         "missing_top_level": missing_top,
-            #         "collection_type_errors": collection_type_errors,
-            #         "nested_key_errors": nested_key_errors,
-            #         "expected_top_level": required_top_level,
-            #         "expected_structure_example": expected_sample,
-            #         "template": template_name
-            #     }
-            #     return ToolResponse.error(
-            #         message="Campos faltantes ou com formato incorreto para preencher o template.",
-            #         error_code=ErrorCodes.VALIDATION_ERROR,
-            #         data=error_data
-            #     ).to_dict()
 
             # --- Renderizar ---
             try:

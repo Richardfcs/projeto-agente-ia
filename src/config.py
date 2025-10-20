@@ -1,4 +1,4 @@
-# Arquivo: /src/config.py (VERSÃO SIMPLIFICADA)
+# Arquivo: /src/config.py
 
 import os
 from dotenv import load_dotenv

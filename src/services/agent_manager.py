@@ -50,7 +50,7 @@ class AgentManager:
                 logger.info("Inicializando AgentManager...")
                 
                 # Configuração do LLM
-                model_name = getattr(Config, "LLM_MODEL", "gemini/gemini-2.5-flash")
+                model_name = getattr(Config, "LLM_MODEL", "gemini/gemini-2.5-flash-lite")
                 temperature = getattr(Config, "LLM_TEMPERATURE", 0.7)
                 debug_verbose = getattr(Config, "DEBUG_VERBOSE_AGENTS", False)
                 

@@ -1,4 +1,4 @@
-# /src/tasks/agents.py (refatorado - mantendo LLM nativo do CrewAI)
+# /src/tasks/agents.py
 from typing import Dict
 from crewai import Agent, LLM
 from src.config import Config

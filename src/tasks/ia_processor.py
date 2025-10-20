@@ -1,4 +1,4 @@
-# /src/tasks/ia_processor.py (versão final, completa e robusta)
+# /src/tasks/ia_processor.py
 
 import json
 import re
