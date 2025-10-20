@@ -34,34 +34,27 @@ def _to_objectid_if_possible(value: Any) -> Any:
     except (InvalidId, TypeError):
         return value
 
-# --- NOVA FUNÇÃO AUXILIAR DE LIMPEZA ---
-def _limpar_contexto_vazio(contexto: Any) -> Any:
+def _normalizar_contexto(contexto: Any) -> Any:
     """
-    Função recursiva para limpar um dicionário de contexto.
-    - Converte strings vazias ou com apenas espaços para None.
-    - Remove itens None de listas.
-    - Funciona com dicionários, listas, strings e outros tipos.
+    Normaliza o contexto para renderização de templates DOCX:
+    - Strings: remove espaços extras, mas mantém vazias como "".
+    - Listas: mantém todos os itens, normalizando recursivamente.
+    - Dicionários: mantém todas as chaves, normalizando valores.
+    - Outros tipos: retornam como estão.
+    
+    Esta versão é mais segura para templates genéricos e não remove campos.
     """
     if isinstance(contexto, str):
-        # Se for uma string e estiver "vazia", retorna None.
-        return contexto if contexto.strip() else None
-        
+        return contexto.strip()  # mantém "" em vez de None
+
     if isinstance(contexto, list):
-        # Se for uma lista, processa cada item e filtra os resultados que se tornaram None.
-        lista_limpa = [_limpar_contexto_vazio(item) for item in contexto]
-        return [item for item in lista_limpa if item is not None]
-        
+        return [_normalizar_contexto(item) for item in contexto]
+
     if isinstance(contexto, dict):
-        # Se for um dicionário, processa cada valor.
-        # Mantém a chave mesmo que o valor se torne None (Jinja2 lida bem com isso).
-        dict_limpo = {}
-        for chave, valor in contexto.items():
-            dict_limpo[chave] = _limpar_contexto_vazio(valor)
-        return dict_limpo
-        
-    # Para qualquer outro tipo de dado (números, booleanos, etc.), retorna como está.
+        return {chave: _normalizar_contexto(valor) for chave, valor in contexto.items()}
+
+    # Tipos numéricos, booleanos ou outros
     return contexto
-# --- FIM DA NOVA FUNÇÃO ---
 
 # ---------------- FileReaderTool ----------------
 class FileReaderInput(BaseModel):
@@ -225,10 +218,10 @@ class TemplateFillerTool(BaseTool):
                 ).to_dict()
 
             # Limpeza do contexto recebido (remove strings vazias, None -> None)
-            contexto_limpo = _limpar_contexto_vazio(context) or {}
+            contexto_limpo = _normalizar_contexto(context) or {}
 
             # Verifica top-level required
-            missing_top = [k for k in required_top_level if k not in contexto_limpo or contexto_limpo.get(k) in (None, "")]
+            # missing_top = [k for k in required_top_level if k not in contexto_limpo or contexto_limpo.get(k) in (None, "")]
 
             # Validação de coleções (se o template espera 'secoes' ou 'dados_coletados', eles devem ser listas)
             collection_type_errors = []
@@ -240,45 +233,45 @@ class TemplateFillerTool(BaseTool):
                 if not isinstance(val, list):
                     collection_type_errors.append({"collection": col, "reason": "expected list", "actual_type": type(val).__name__})
 
-            # Validação básica de itens nas coleções: se temos dotted fields como 'secao.titulo' -> cada item in 'secoes' deve ser dict com 'titulo'
-            nested_key_errors = []
-            for dotted_field in dotted:
-                if '.' not in dotted_field:
-                    continue
-                base, subkey = dotted_field.split('.', 1)
-                if base in contexto_limpo:
-                    val = contexto_limpo.get(base)
-                    if isinstance(val, list) and len(val) > 0:
-                        # verifica apenas o primeiro item (sanity check)
-                        first = val[0]
-                        if not isinstance(first, dict) or subkey not in first:
-                            nested_key_errors.append({"collection": base, "missing_in_item": subkey})
-                    else:
-                        # se não é lista, será reportado em collection_type_errors or missing_top
-                        pass
+            # # Validação básica de itens nas coleções: se temos dotted fields como 'secao.titulo' -> cada item in 'secoes' deve ser dict com 'titulo'
+            # nested_key_errors = []
+            # for dotted_field in dotted:
+            #     if '.' not in dotted_field:
+            #         continue
+            #     base, subkey = dotted_field.split('.', 1)
+            #     if base in contexto_limpo:
+            #         val = contexto_limpo.get(base)
+            #         if isinstance(val, list) and len(val) > 0:
+            #             # verifica apenas o primeiro item (sanity check)
+            #             first = val[0]
+            #             if not isinstance(first, dict) or subkey not in first:
+            #                 nested_key_errors.append({"collection": base, "missing_in_item": subkey})
+            #         else:
+            #             # se não é lista, será reportado em collection_type_errors or missing_top
+            #             pass
 
-            # Se houver problemas, retorne erro estruturado com expected_structure amostral
-            if missing_top or collection_type_errors or nested_key_errors:
-                expected_sample = {}
-                for k in required_top_level:
-                    if k in collections:
-                        expected_sample[k] = [{"...": "..."}]  # indica lista de dicts
-                    else:
-                        expected_sample[k] = "string_or_value_example"
+            # # Se houver problemas, retorne erro estruturado com expected_structure amostral
+            # if missing_top or collection_type_errors or nested_key_errors:
+            #     expected_sample = {}
+            #     for k in required_top_level:
+            #         if k in collections:
+            #             expected_sample[k] = [{"...": "..."}]  # indica lista de dicts
+            #         else:
+            #             expected_sample[k] = "string_or_value_example"
 
-                error_data = {
-                    "missing_top_level": missing_top,
-                    "collection_type_errors": collection_type_errors,
-                    "nested_key_errors": nested_key_errors,
-                    "expected_top_level": required_top_level,
-                    "expected_structure_example": expected_sample,
-                    "template": template_name
-                }
-                return ToolResponse.error(
-                    message="Campos faltantes ou com formato incorreto para preencher o template.",
-                    error_code=ErrorCodes.VALIDATION_ERROR,
-                    data=error_data
-                ).to_dict()
+            #     error_data = {
+            #         "missing_top_level": missing_top,
+            #         "collection_type_errors": collection_type_errors,
+            #         "nested_key_errors": nested_key_errors,
+            #         "expected_top_level": required_top_level,
+            #         "expected_structure_example": expected_sample,
+            #         "template": template_name
+            #     }
+            #     return ToolResponse.error(
+            #         message="Campos faltantes ou com formato incorreto para preencher o template.",
+            #         error_code=ErrorCodes.VALIDATION_ERROR,
+            #         data=error_data
+            #     ).to_dict()
 
             # --- Renderizar ---
             try:
