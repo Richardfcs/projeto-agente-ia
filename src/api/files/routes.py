@@ -1,6 +1,6 @@
 # Arquivo: /src/api/files/routes.py
 
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, Response, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -9,6 +9,31 @@ from gridfs.errors import NoFile
 from src.db.mongo import get_db, get_gridfs
 import io
 import re
+import mimetypes
+import math
+
+def _to_objectid_or_none(val):
+    if isinstance(val, ObjectId):
+        return val
+    try:
+        return ObjectId(str(val))
+    except Exception:
+        return None
+
+def _guess_mimetype(filename: str):
+    if not filename:
+        return "application/octet-stream"
+    mime, _ = mimetypes.guess_type(filename)
+    if mime:
+        return mime
+    ext = filename.lower().rsplit('.', 1)[-1]
+    if ext == "docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if ext == "xlsx":
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if ext == "pdf":
+        return "application/pdf"
+    return "application/octet-stream"
 
 # Cria o Blueprint para as rotas de arquivos
 files_bp = Blueprint('files_bp', __name__)
@@ -92,82 +117,104 @@ def upload_template():
 @files_bp.route('/documents/<string:document_id>/download', methods=['GET'])
 @jwt_required()
 def download_document_by_id(document_id):
-    """
-    Permite o download de um documento usando o ID do metadado (_id),
-    abstraindo o ID do GridFS para o frontend. Esta é a rota preferencial
-    para ser usada pela interface do usuário.
-    """
     current_user_id = get_jwt_identity()
     db = get_db()
     fs = get_gridfs()
 
-    try:
-        # 1. Valida o ID do documento recebido na URL
-        doc_oid = ObjectId(document_id)
-    except InvalidId:
+    # valida document_id
+    doc_oid = _to_objectid_or_none(document_id)
+    if not doc_oid:
         return jsonify({"erro": "ID de documento inválido"}), 400
 
-    # 2. Encontra o metadado do documento e, crucialmente, verifica se ele pertence ao usuário logado.
-    #    Esta é a verificação de segurança mais importante.
-    doc_meta = db.documents.find_one({
-        "_id": doc_oid, 
-        "owner_id": ObjectId(current_user_id)
-    })
-
+    # busca metadado sem forçar tipo do owner — buscamos o documento e checamos depois
+    doc_meta = db.documents.find_one({"_id": doc_oid})
     if not doc_meta:
-        # Se não encontrar, retorna 404, seja porque o documento não existe ou por falta de permissão.
-        return jsonify({"erro": "Documento não encontrado ou acesso negado"}), 404
+        return jsonify({"erro": "Documento não encontrado"}), 404
 
-    # 3. Obtém o ID do GridFS a partir do metadado encontrado
-    gridfs_id = doc_meta.get("gridfs_file_id")
-    if not gridfs_id:
-        # Caso de segurança para dados inconsistentes no banco
+    # normaliza owner check: se houver owner_id no documento, compare como string (tolerante)
+    owner_id_meta = doc_meta.get("owner_id")
+    if owner_id_meta:
+        # converte ambos para str para evitar mismatch ObjectId vs str
+        if str(owner_id_meta) != str(current_user_id):
+            return jsonify({"erro": "Acesso negado"}), 403
+
+    gridfs_id_raw = doc_meta.get("gridfs_file_id")
+    if not gridfs_id_raw:
+        current_app.logger.error("Documento sem gridfs_file_id: %s", document_id)
         return jsonify({"erro": "Metadado do documento está corrompido (sem ID de arquivo)"}), 500
 
+    gridfs_oid = _to_objectid_or_none(gridfs_id_raw) or gridfs_id_raw  # aceita string ou ObjectId
+
     try:
-        # 4. Usa o ID do GridFS para buscar o arquivo real no sistema de armazenamento
-        gridfs_file = fs.get(gridfs_id)
-        
-        # 5. Envia o arquivo como um stream para o cliente, forçando o download.
-        #    Passar o objeto 'gridfs_file' diretamente é a forma mais eficiente em termos de memória.
-        return send_file(
-            gridfs_file,
-            download_name=gridfs_file.filename, # Garante o nome original do arquivo
-            as_attachment=True # Força o navegador a abrir a caixa de diálogo "Salvar como..."
-        )
+        gridfs_file = fs.get(gridfs_oid)
     except NoFile:
         return jsonify({"erro": "Arquivo não encontrado no sistema de armazenamento (GridFS)"}), 404
+    except Exception as e:
+        current_app.logger.exception("Erro ao obter arquivo do GridFS: %s", e)
+        return jsonify({"erro": "Erro interno ao acessar o arquivo"}), 500
+
+    filename = doc_meta.get("filename") or getattr(gridfs_file, "filename", f"document_{document_id}")
+    mimetype = _guess_mimetype(filename)
+
+    # streaming generator (lê em chunks do GridOut)
+    def generate():
+        try:
+            chunk_size = 64 * 1024  # 64KB por chunk (ajustável)
+            remaining = getattr(gridfs_file, "length", None)
+            # gridfs_file.read(chunk_size) é ok; usando loop para liberar memória
+            while True:
+                chunk = gridfs_file.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                gridfs_file.close()
+            except Exception:
+                pass
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": mimetype,
+    }
+    # Content-Length se disponível
+    try:
+        length = getattr(gridfs_file, "length", None)
+        if length:
+            headers["Content-Length"] = str(length)
+    except Exception:
+        pass
+
+    return Response(generate(), headers=headers)
 
 @files_bp.route('/documents/<string:document_id>/metadata', methods=['GET'])
 @jwt_required()
 def get_document_metadata(document_id):
-    """
-    Retorna apenas os metadados de um documento específico.
-    """
     current_user_id = get_jwt_identity()
     db = get_db()
 
-    try:
-        doc_oid = ObjectId(document_id)
-    except InvalidId:
+    doc_oid = _to_objectid_or_none(document_id)
+    if not doc_oid:
         return jsonify({"erro": "ID de documento inválido"}), 400
 
-    doc_meta = db.documents.find_one({
-        "_id": doc_oid,
-        "owner_id": ObjectId(current_user_id)
-    })
-
+    doc_meta = db.documents.find_one({"_id": doc_oid})
     if not doc_meta:
-        return jsonify({"erro": "Documento não encontrado ou acesso negado"}), 404
-    
-    # Prepara os dados para serem enviados como JSON
-    doc_meta['_id'] = str(doc_meta['_id'])
-    doc_meta['owner_id'] = str(doc_meta['owner_id'])
-    doc_meta['gridfs_file_id'] = str(doc_meta['gridfs_file_id'])
-    if 'created_at' in doc_meta:
-        doc_meta['created_at'] = doc_meta['created_at'].isoformat()
-        
-    return jsonify(doc_meta)
+        return jsonify({"erro": "Documento não encontrado"}), 404
+
+    owner_id_meta = doc_meta.get("owner_id")
+    if owner_id_meta and str(owner_id_meta) != str(current_user_id):
+        return jsonify({"erro": "Acesso negado"}), 403
+
+    # sanitize/whitelist fields a retornar
+    safe_meta = {
+        "document_id": str(doc_meta.get("_id")),
+        "filename": doc_meta.get("filename"),
+        "template_used": doc_meta.get("template_used"),
+        "created_at": doc_meta.get("created_at").isoformat() if doc_meta.get("created_at") else None,
+        "owner_id": str(doc_meta.get("owner_id")) if doc_meta.get("owner_id") else None,
+    }
+
+    return jsonify(safe_meta), 200
 
 @files_bp.route('/documents', methods=['GET'])
 @jwt_required()
