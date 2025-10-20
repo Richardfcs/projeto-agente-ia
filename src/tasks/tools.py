@@ -6,7 +6,7 @@ from zipfile import ZipFile
 from datetime import datetime
 from typing import Type, Optional, Dict, Any
 from src.utils.docx_placeholders import extract_placeholders_from_docx_bytes
-from jinja2 import Environment, StrictUndefined, exceptions as jinja_exceptions
+from jinja2 import Environment, Undefined , exceptions as jinja_exceptions
 
 import pandas as pd
 from bson import ObjectId
@@ -220,28 +220,16 @@ class TemplateFillerTool(BaseTool):
             # Limpeza do contexto recebido (remove strings vazias, None -> None)
             contexto_limpo = _normalizar_contexto(context) or {}
 
-            # Validação de coleções (se o template espera 'secoes' ou 'dados_coletados', eles devem ser listas)
-            collection_type_errors = []
-            for col in collections:
-                val = contexto_limpo.get(col)
-                if val is None:
-                    # será coberto por missing_top
-                    continue
-                if not isinstance(val, list):
-                    collection_type_errors.append({"collection": col, "reason": "expected list", "actual_type": type(val).__name__})
-
-            # --- Renderizar ---
+            # --- Renderizar --- 
             try:
                 doc = DocxTemplate(io.BytesIO(file_bytes))
-                # tenta render com StrictUndefined para capturar campos faltantes
-                env = Environment(undefined=StrictUndefined)
+                # usa Undefined para não quebrar por campos ausentes
+                env = Environment(undefined=Undefined)
                 try:
                     # docxtpl aceita jinja_env kw em versões recentes
                     doc.render(contexto_limpo, jinja_env=env)
                 except TypeError:
                     # fallback caso docxtpl não aceite jinja_env
-                    # mas ainda queremos capturar UndefinedError: render sem StrictUndefined -> usa env to render string?
-                    # prática: pré-validar variáveis antes de render (já fazemos), então chamar doc.render
                     doc.render(contexto_limpo)
 
                 final_doc_stream = io.BytesIO()
