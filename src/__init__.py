@@ -9,11 +9,28 @@ from flask_swagger_ui import get_swaggerui_blueprint
 
 logger = logging.getLogger(__name__)
 
+def _initialize_agents_fallback(app):
+    """Fallback simplificado para inicialização de agentes"""
+    try:
+        logger.info("trying_fallback_agents")
+        # Método mais direto - tenta importar e criar agentes
+        from src.tasks.agents import create_agents
+        agents = create_agents()
+        app.agents = agents
+        logger.info("fallback_agents_success")
+    except Exception as e:
+        logger.error("fallback_agents_failed", error=str(e))
+        # Cria agentes vazios para não quebrar a aplicação
+        app.agents = {}
+
 def create_app():
     """Cria e configura a instância da aplicação Flask."""
     
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    from src.utils.observability import setup_logging
+    setup_logging()
     
     # --- CONFIGURAÇÃO DE CORS ---
     # Define de quais origens (URLs de frontend) aceitaremos requisições.
@@ -24,22 +41,32 @@ def create_app():
     with app.app_context():
         # Inicializa DB (faz conexões necessárias)
         init_db(app)
-
-        # Tenta criar os agentes dinamicamente (fábrica em src.tasks.agents.create_agents)
-        # Se a função não existir ou falhar, logamos e seguimos — isso evita quebrar o startup por import-time side-effects.
+        
+         # Inicialização da memória persistente
         try:
-            from src.tasks.agents import create_agents
-            agents = create_agents()
-            # Armazena os agentes na app.extensions (padrão Flask para extensões/objetos)
-            app.extensions = getattr(app, "extensions", {})
-            app.extensions["agents"] = agents
-            # opcional: também expõe como app.agents para conveniência
-            app.agents = agents
-            logger.info("Agentes instanciados e vinculados à app.extensions['agents']")
+            from src.services.memory_manager import init_conversation_states_collection
+            from src.db.mongo import get_db
+            init_conversation_states_collection(get_db())
+            logger.info("conversation_states_initialized")
         except Exception as e:
-            # Se ocorrer erro, não interrompa a inicialização — registre para diagnóstico.
-            logger.exception("Falha ao instancenciar agentes via create_agents(): %s", e)
-            # Nota: se os blueprints/handlers dependem dos agentes, eles devem falhar de forma controlada quando tentarem usar app.agents.
+            logger.error("conversation_states_init_failed", error=str(e))
+
+        # Inicialização do AgentManager
+        try:
+            from src.services.agent_manager import AgentManager
+            agent_manager = AgentManager()
+            
+            if agent_manager.initialize():
+                app.agent_manager = agent_manager
+                app.agents = agent_manager.agents
+                logger.info("agent_manager_initialized")
+            else:
+                logger.error("agent_manager_init_failed")
+                _initialize_agents_fallback(app)
+                
+        except Exception as e:
+            logger.error("agent_manager_critical_error", error=str(e))
+            _initialize_agents_fallback(app)
 
     # URL onde a especificação (o arquivo .yaml) estará disponível
     SWAGGER_URL = '/api/docs'

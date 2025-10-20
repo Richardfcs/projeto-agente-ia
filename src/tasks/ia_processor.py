@@ -1,7 +1,6 @@
 # /src/tasks/ia_processor.py (versão final, completa e robusta)
 
 import json
-import logging
 import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -10,49 +9,12 @@ from bson import ObjectId
 from crewai import Crew, Process, Task, Agent
 from src.db.mongo import get_db
 
-logger = logging.getLogger(__name__)
+from src.services.intent_router import HybridIntentRouter, Intent
+from src.services.memory_manager import PersistentConversationState
+from flask import current_app
+from src.utils.observability import log_with_context, track_performance, correlation_ctx
 
-# --- INÍCIO DA MUDANÇA (PILAR 5: COERÊNCIA) ---
-
-class ConversationState:
-    """
-    Uma classe simples para gerenciar o estado de curto prazo de uma conversa.
-    Isso atua como a "memória de trabalho" do sistema de IA, melhorando a coerência.
-    """
-    def __init__(self):
-        self.ultimo_template_mencionado: Optional[str] = None
-        self.ultimo_documento_gerado_id: Optional[str] = None
-        self.lista_templates_disponiveis: Optional[List[str]] = None
-        self.contexto_extra_para_llm: str = ""
-
-    def update_from_tool_output(self, resultado_crew: str):
-        """Atualiza o estado com base na saída JSON de uma ferramenta."""
-        try:
-            data = json.loads(resultado_crew)
-            if isinstance(data, dict):
-                if data.get("templates"):
-                    self.lista_templates_disponiveis = data["templates"]
-                    self.contexto_extra_para_llm += f"\n- Os templates disponíveis no sistema são: {', '.join(data['templates'])}."
-                    # Se apenas um template estiver disponível, ele se torna o "último mencionado"
-                    if len(data["templates"]) == 1:
-                        self.ultimo_template_mencionado = data["templates"][0]
-                        self.contexto_extra_para_llm += f" O template '{self.ultimo_template_mencionado}' foi identificado como contexto principal."
-                if data.get("document_id"):
-                    self.ultimo_documento_gerado_id = data["document_id"]
-        except (json.JSONDecodeError, TypeError):
-            pass # A saída não era um JSON de ferramenta.
-
-    def injetar_contexto_no_prompt(self, historico_texto: str) -> str:
-        """Adiciona o contexto de estado atual ao histórico que será enviado para os agentes."""
-        if not self.contexto_extra_para_llm:
-            return historico_texto
-        
-        contexto_formatado = "\n\n--- CONTEXTO ATUAL DA CONVERSA (MEMÓRIA DE CURTO PRAZO) ---\n" + self.contexto_extra_para_llm
-        return historico_texto + contexto_formatado
-
-# --- FIM DA MUDANÇA ---
-
-# --- Funções de Suporte ---
+logger = log_with_context(component="IAProcessor")
 
 # Carregador de Agentes
 try:
@@ -95,31 +57,33 @@ def _ensure_agents() -> Dict[str, Any]:
 
 # --- INÍCIO DA MUDANÇA FINAL (ROTEADOR INTELIGENTE) ---
 
-def _rotear_intencao_hibrido(historico_cursor_list: List[Dict[str, Any]]) -> str:
-    """ Roteador simplificado e mais preciso. """
-    ultima_mensagem_obj = next((msg for msg in reversed(historico_cursor_list) if msg.get('role') == 'user'), None)
-    if ultima_mensagem_obj:
-        ultima_mensagem_texto = ultima_mensagem_obj.get('content', '').lower()
-
-        # REGRA 1 (LER): Prioridade máxima para intenção de leitura
-        palavras_chave_leitura = ['leia', 'o que tem em', 'o que há em', 'qual o conteúdo de', 'extraia as informações de']
-        if any(keyword in ultima_mensagem_texto for keyword in palavras_chave_leitura) and '.docx' in ultima_mensagem_texto:
-            logger.info("Roteador: Intenção 'LER_DOCUMENTO' detectada por regra.")
-            return 'LER_DOCUMENTO'
-
-        # REGRA 2 (PREENCHER): Procura por intenção de preenchimento
-        palavras_chave_preenchimento = ['use o template', 'preencha o template', 'no template']
-        if any(keyword in ultima_mensagem_texto for keyword in palavras_chave_preenchimento) and '.docx' in ultima_mensagem_texto:
-            logger.info("Roteador: Intenção 'PREENCHER_TEMPLATE' detectada por regra.")
-            return 'PREENCHER_TEMPLATE'
-
-    # Se nenhuma regra de alta prioridade foi acionada, a IA decide o resto.
-    logger.info("Roteador: Nenhuma regra de alta prioridade. Escalando para classificação por IA.")
-    historico_texto = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in historico_cursor_list])
+def _rotear_intencao(historico_cursor_list: List[Dict[str, Any]]) -> tuple[str, Dict]:
+    """
+    Nova versão: usa roteador híbrido antes de chamar LLM
+    """
+    ultima_mensagem_obj = next(
+        (msg for msg in reversed(historico_cursor_list) 
+         if msg.get('role') == 'user'), 
+        None
+    )
     
-    agents = _ensure_agents(); gerente = agents["gerente"]
-    task = Task(description=f"Classifique a intenção da última mensagem (CRIAR_DOCUMENTO_SIMPLES ou CONVERSA_GERAL) com base no histórico:\n{historico_texto}", expected_output="Apenas a string da categoria.", agent=gerente)
-    crew = Crew(agents=[gerente], tasks=[task], verbose=0); return str(crew.kickoff()).strip()
+    if not ultima_mensagem_obj:
+        return "CONVERSA_GERAL", {}
+    
+    ultima_mensagem_texto = ultima_mensagem_obj.get('content', '')
+    
+    # Usa o roteador híbrido
+    router = HybridIntentRouter()
+    intent, confidence, metadata = router.route(ultima_mensagem_texto, historico_cursor_list)
+    
+    # SÓ chama LLM se confiança muito baixa (apenas ~20% dos casos)
+    if confidence < 0.4:
+        logger.info("Confiança baixa, usando LLM para classificação")
+        intent_llm = _classificar_intencao_por_ia(historico_cursor_list)
+        return intent_llm, {}
+    
+    logger.info(f"Roteamento concluído sem LLM: {intent.value} (confiança: {confidence})")
+    return intent.value, metadata
 
 def _classificar_intencao_por_ia(historico_texto: str) -> str:
     """
@@ -144,20 +108,33 @@ def _classificar_intencao_por_ia(historico_texto: str) -> str:
 # --- FIM DA MUDANÇA ---
 
 # --- ÚLTIMA MENSAGEM PARA EXTRAÇÃO DE TEMPLATE ---
-def _extrair_template_da_ultima_mensagem(historico_cursor: List[Dict[str, Any]]) -> Optional[str]:
+def _extrair_template_da_ultima_mensagem(historico_cursor: List[Dict[str, Any]], metadata: Dict = None) -> Optional[str]:
     """
-    Usa regex para encontrar um nome de template .docx, mas busca APENAS
-    na mensagem mais recente do usuário para evitar contaminação de contexto.
+    Usa metadata do roteador quando disponível (preservando case). Se não, tenta regex no texto original.
     """
-    # Itera de trás para frente no histórico para pegar a última mensagem do usuário
-    ultima_msg_usuario = next((msg for msg in reversed(historico_cursor) if msg.get('role') == 'user'), None)
+    # Se o roteador já extraiu o nome, usa ele (preserva case)
+    if metadata and metadata.get('matched_groups'):
+        template_name = metadata['matched_groups'][0]
+        if template_name:
+            logger.info(f"Template extraído do metadata: {template_name}")
+            return template_name
+
+    # Fallback para regex tradicional usando o texto original (não lowercased)
+    ultima_msg_usuario = next(
+        (msg for msg in reversed(historico_cursor)
+         if msg.get('role') == 'user'),
+        None
+    )
+
     if ultima_msg_usuario:
         content = ultima_msg_usuario.get('content', '')
-        # A regex agora precisa procurar por aspas simples ou duplas, ou nenhuma aspas
-        match = re.search(r"\'([\w\d_-]+\.docx?)\'|\"([\w\d_-]+\.docx?)\"|([\w\d_-]+\.docx)", content, re.IGNORECASE)
+        match = re.search(r"['\"]?([\w\d_\-]+\.docx?)['\"]?", content, re.IGNORECASE)
         if match:
-            # Retorna o primeiro grupo que não for nulo
-            return match.group(1) or match.group(2) or match.group(3)
+            # match.group(1) preserva case do texto original
+            template_name = match.group(1)
+            logger.info(f"Template extraído por regex: {template_name}")
+            return template_name
+
     return None
 
 def _extrair_extensao_desejada(texto: str) -> str:
@@ -169,12 +146,14 @@ def _extrair_extensao_desejada(texto: str) -> str:
     return 'docx'
 
 # --- Orquestrador Principal ---
+@track_performance
 def processar_solicitacao_ia(message_id: str) -> str:
     """
     Orquestra a equipe de IA classificando a intenção do usuário primeiro e
     depois construindo um pipeline de tarefas sequencial e explícito.
     """
-    logger.info("Iniciando orquestração com roteamento de intenção para a mensagem: %s", message_id)
+    correlation_ctx.set_correlation_id(f"msg_{message_id}")
+    logger.info("starting_orchestration", message_id=message_id)
     db = get_db()
     
     mensagem_atual = None
@@ -191,14 +170,14 @@ def processar_solicitacao_ia(message_id: str) -> str:
         historico_cursor_list = list(db.messages.find({"conversation_id": conversation_id}).sort("timestamp", 1))
         
         # Instancia o gerenciador de estado da conversa
-        estado_conversa = ConversationState()
+        estado_conversa = PersistentConversationState(db, str(conversation_id))
         
         # Roda o roteador para obter a intenção
-        intencao = _rotear_intencao_hibrido(historico_cursor_list)
-        logger.info(f"Intenção detectada: {intencao}")
+        intencao, routing_metadata = _rotear_intencao(historico_cursor_list)
+        logger.info("intention_detected", intention=intencao)
         
         # Cria o histórico de texto e o enriquece com a memória de curto prazo
-        historico_texto = estado_conversa.injetar_contexto_no_prompt("\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in historico_cursor_list]))
+        historico_texto = estado_conversa.injectar_contexto_no_prompt("\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in historico_cursor_list]))
 
         # Passo 2: Monta dinamicamente a lista de tarefas e agentes para a Crew
         tasks: List[Task] = []
@@ -213,13 +192,13 @@ def processar_solicitacao_ia(message_id: str) -> str:
 
         if intencao == 'PREENCHER_TEMPLATE':
             # --- CHAMAR A FUNÇÃO DE EXTRAÇÃO QUE FOCA NA ÚLTIMA MENSAGEM ---
-            template_name = _extrair_template_da_ultima_mensagem(historico_cursor_list)
+            template_name = _extrair_template_da_ultima_mensagem(historico_cursor_list, routing_metadata)
             
             if not template_name:
                 intencao = 'CONVERSA_GERAL'
                 historico_texto += "\n\nsystem: A intenção era preencher um template, mas o nome do arquivo .docx não foi encontrado. A intenção foi alterada para CONVERSA_GERAL para pedir esclarecimento."
             else:
-                logger.info(f"Template a ser usado: {template_name}")
+                logger.info("template_selected", template_name=template_name)
                 
                 tarefa_extracao_dados = Task(description=f"Gere o conteúdo JSON para o template '{template_name}' com base neste histórico:\n{historico_texto}", expected_output="Apenas o bloco JSON do conteúdo.", agent=analista)
                 tarefa_preenchimento = Task(description=f"Chame a ferramenta `TemplateFillerTool` com `template_name`='{template_name}', `owner_id`='{user_id}', e o `context` da tarefa anterior.", expected_output="O resultado JSON da ferramenta `TemplateFillerTool`.", agent=especialista_doc, context=[tarefa_extracao_dados])
@@ -304,11 +283,14 @@ def processar_solicitacao_ia(message_id: str) -> str:
             verbose=True,
         )
         resultado_crew = crew.kickoff()
+
+        estado_conversa.update_from_tool_output(str(resultado_crew))
         
         # Passo 4: Processa o resultado final e salva no banco de dados
-        logger.info("Resultado bruto da Crew: %s", str(resultado_crew))
-        
+        logger.info("crew_raw_result", result_length=len(str(resultado_crew)))
+    
         resposta_final, generated_doc_id = str(resultado_crew), None
+
         
         # A resposta final idealmente é o que a última tarefa (revisão) retornou.
         # Tentamos extrair o ID do documento da resposta para o frontend.
@@ -336,11 +318,11 @@ def processar_solicitacao_ia(message_id: str) -> str:
         db.messages.insert_one(assistant_message)
         db.conversations.update_one({"_id": conversation_id}, {"$set": {"last_updated_at": datetime.utcnow()}})
         
-        logger.info("Orquestração concluída para a mensagem %s.", message_id)
+        logger.info("orchestration_completed", message_id=message_id)
         return "Sucesso"
 
     except Exception as e:
-        logger.exception("ERRO CRÍTICO ao orquestrar a CrewAI para a mensagem %s: %s", message_id, e)
+        logger.exception("critical_orchestration_error", message_id=message_id, error=str(e), error_type=type(e).__name__)
         if mensagem_atual:
             db.messages.insert_one({
                 "conversation_id": mensagem_atual.get("conversation_id"),
