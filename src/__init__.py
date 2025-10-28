@@ -1,27 +1,28 @@
-# /src/__init__.py
+# src/__init__.py
+
+"""
+Ponto de Entrada e Fábrica da Aplicação Flask.
+
+Responsável por criar e configurar a instância da aplicação Flask.
+Após a refatoração para LangGraph, a inicialização foi significativamente simplificada.
+
+- A inicialização complexa do 'AgentManager' foi removida.
+- O LLM e as ferramentas agora são inicializados de forma 'lazy' (preguiçosa) dentro
+  do módulo do grafo (`src/tasks/graph/nodes.py`) quando são realmente necessários.
+- A inicialização do banco de dados e dos blueprints da API permanece como a base sólida da aplicação.
+"""
+
 import logging
 from flask import Flask
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
-from src.config import Config
-from src.db.mongo import init_db
 from flask_swagger_ui import get_swaggerui_blueprint
 
-logger = logging.getLogger(__name__)
+from src.config import Config
+from src.db.mongo import init_db
+from src.utils.observability import setup_logging
 
-def _initialize_agents_fallback(app):
-    """Fallback simplificado para inicialização de agentes"""
-    try:
-        logger.info("trying_fallback_agents")
-        # Método mais direto - tenta importar e criar agentes
-        from src.tasks.agents import create_agents
-        agents = create_agents()
-        app.agents = agents
-        logger.info("fallback_agents_success")
-    except Exception as e:
-        logger.error("fallback_agents_failed", error=str(e))
-        # Cria agentes vazios para não quebrar a aplicação
-        app.agents = {}
+logger = logging.getLogger(__name__)
 
 def create_app():
     """Cria e configura a instância da aplicação Flask."""
@@ -29,50 +30,32 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    from src.utils.observability import setup_logging
+    # Configura o logging estruturado para toda a aplicação.
     setup_logging()
     
-    # --- CONFIGURAÇÃO DE CORS ---
-    # Define de quais origens (URLs de frontend) aceitaremos requisições.
+    # Configura o CORS para permitir requisições do frontend.
     CORS(app, supports_credentials=True)
     
+    # Inicializa o gerenciador de JWT para autenticação.
     jwt = JWTManager(app)
     
+    # O contexto da aplicação é usado para garantir que as conexões
+    # e configurações estejam disponíveis quando necessário.
     with app.app_context():
-        # Inicializa DB (faz conexões necessárias)
+        # Inicializa a conexão com o banco de dados MongoDB e GridFS.
         init_db(app)
         
-         # Inicialização da memória persistente
-        try:
-            from src.services.memory_manager import init_conversation_states_collection
-            from src.db.mongo import get_db
-            init_conversation_states_collection(get_db())
-            logger.info("conversation_states_initialized")
-        except Exception as e:
-            logger.error("conversation_states_init_failed", error=str(e))
+        # --- LÓGICA DE INICIALIZAÇÃO REMOVIDA ---
+        # A inicialização do AgentManager, do memory_manager e dos agentes do CrewAI
+        # foi completamente removida daqui. Nossa nova arquitetura com LangGraph não
+        # requer um pré-carregamento complexo no startup da aplicação.
+        # O grafo e seus componentes são importados e utilizados diretamente pelo
+        # orquestrador `ia_processor`.
 
-        # Inicialização do AgentManager
-        try:
-            from src.services.agent_manager import AgentManager
-            agent_manager = AgentManager()
-            
-            if agent_manager.initialize():
-                app.agent_manager = agent_manager
-                app.agents = agent_manager.agents
-                logger.info("agent_manager_initialized")
-            else:
-                logger.error("agent_manager_init_failed")
-                _initialize_agents_fallback(app)
-                
-        except Exception as e:
-            logger.error("agent_manager_critical_error", error=str(e))
-            _initialize_agents_fallback(app)
+    # --- Configuração do Swagger UI para a Documentação da API ---
+    SWAGGER_URL = '/api/docs'  # URL para a UI do Swagger
+    API_URL = '/static/openapi.yaml'  # URL para o arquivo de especificação da API
 
-    # URL onde a especificação (o arquivo .yaml) estará disponível
-    SWAGGER_URL = '/api/docs'
-    API_URL = '/static/openapi.yaml'
-
-    # Cria o Blueprint da Swagger UI
     swaggerui_blueprint = get_swaggerui_blueprint(
         SWAGGER_URL,
         API_URL,
@@ -80,13 +63,10 @@ def create_app():
             'app_name': "Agente de IA - API Docs"
         }
     )
-
-    # Registra o Blueprint da Swagger
     app.register_blueprint(swaggerui_blueprint)
 
-    # Registra os Blueprints da API
-    # IMPORTANTE: importe os blueprints aqui (após init_db e tentativa de criar agentes)
-    # Isso reduz a chance de import-time cycles causarem inicialização falha.
+    # --- Registro dos Blueprints da API ---
+    # Importa e registra as rotas para as diferentes partes da nossa API.
     from src.api.chat.routes import chat_bp
     from src.api.auth.routes import auth_bp
     from src.api.files.routes import files_bp
@@ -97,6 +77,8 @@ def create_app():
     
     @app.route('/health')
     def health_check():
+        """Endpoint simples para verificar se a aplicação está no ar."""
         return "Servidor Flask está funcionando perfeitamente!"
 
+    logger.info("Aplicação Flask criada e configurada com sucesso.")
     return app
