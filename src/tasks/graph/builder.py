@@ -56,17 +56,13 @@ def build_graph():
     # Isso substitui a necessidade de um agente "Gerente" e a lógica `if/elif`.
     workflow.add_conditional_edges(
         "router",  # Nó de origem
-        lambda state: state["intent"],  # Função que decide o caminho (lê a intenção do estado)
+        lambda state: state["routed_tool_call"]["tool"],  # Função que lê o nome da ferramenta
         {
-            # Mapeamento: "valor_da_intencao" -> "nome_do_proximo_no"
-            "PREENCHER_TEMPLATE": "fill_template_flow",
-            "LER_DOCUMENTO": "read_document_flow",
-            "CRIAR_DOCUMENTO_SIMPLES": "create_document_flow",
-            
-            # Intenções que não possuem um fluxo complexo dedicado são direcionadas
-            # para o nó de chat geral.
-            "LISTAR_TEMPLATES": "general_chat_flow",
-            "CONVERSA_GERAL": "general_chat_flow",
+            # Mapeamento: "NomeDaFerramenta" -> "nome_do_proximo_no"
+            "FillTemplate": "fill_template_flow",
+            "CreateDocument": "create_document_flow",
+            "ReadDocument": "read_document_flow",
+            "GeneralChat": "general_chat_flow",
         }
     )
 

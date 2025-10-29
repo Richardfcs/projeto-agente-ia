@@ -59,6 +59,7 @@ class GraphState(TypedDict):
 
     # --- Atributos de Execução ---
     intent: Optional[str]
+    routed_tool_call: Optional[Dict[str, Any]]
     tool_output: Optional[Dict[str, Any]]
     generation: Optional[Any] # Pode ser string, dict, etc.
 

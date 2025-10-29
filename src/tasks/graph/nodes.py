@@ -24,7 +24,7 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from src.config import Config
 from .state import GraphState
-from src.services.intent_router import HybridIntentRouter
+from src.services.intelligent_router import IntelligentRouter, CreateDocument, FillTemplate, ReadDocument, GeneralChat
 from src.tasks.tools import (
     template_lister_tool,
     template_inspector_tool,
@@ -62,16 +62,25 @@ def _get_template_name_from_state(state: GraphState) -> str | None:
 
 def router_node(state: GraphState) -> Dict[str, Any]:
     """
-    Primeiro nó do grafo: classifica a intenção do usuário usando o roteador híbrido.
+    Primeiro nó do grafo: usa o roteador inteligente baseado em Tool Calling
+    para classificar a intenção do usuário de forma semântica.
     """
-    logger.info("Executando router_node", conversation_id=state["conversation_id"])
+    logger.info("Executando router_node (Intelligent)", conversation_id=state["conversation_id"])
     if not llm:
         return {"final_response": "Erro crítico: O modelo de linguagem (LLM) não está disponível."}
         
-    router = HybridIntentRouter()
-    intent, _, _ = router.route(state["prompt"], state["conversation_history"])
-    logger.info(f"Intenção detectada: {intent.value}")
-    return {"intent": intent.value}
+    router = IntelligentRouter()
+    has_attachment = bool(state.get("input_document_id"))
+    
+    # Roteia e obtém uma classe Pydantic como resultado
+    routed_tool = router.route(state["prompt"], state["conversation_history"], has_attachment)
+    
+    tool_name, tool_args = router.route(state["prompt"], state["conversation_history"], has_attachment)
+    
+    logger.info(f"Intenção roteada para: {tool_name} com args: {tool_args}")
+
+    # Armazena a chamada completa no estado para os próximos nós usarem
+    return {"routed_tool_call": {"tool": tool_name, "args": tool_args}}
 
 def fill_template_flow_node(state: GraphState) -> Dict[str, Any]:
     """
