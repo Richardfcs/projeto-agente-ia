@@ -22,14 +22,11 @@ def _extract_tokens_from_xml(xml_text: str):
 
 def extract_placeholders_from_docx_bytes(file_bytes: bytes):
     """
-    Retorna dict com:
-      - variables: variáveis simples encontradas (ex: 'titulo_documento')
-      - collections: coleções detectadas via {% for var in collection %}
-      - dotted: expressões pontuadas (ex: 'secao.titulo')
-      - for_map: mapeamento var->collection
-      - all_bases: required_top_level (coleções + variables simples + bases substituídas)
+    Versão aprimorada que identifica corretamente coleções e ignora
+    variáveis de loop aninhadas do escopo global.
     """
     try:
+        # ... (lógica para extrair texto do xml, sem alterações) ...
         with ZipFile(io.BytesIO(file_bytes)) as z:
             names = z.namelist()
             all_tokens = []
@@ -37,47 +34,42 @@ def extract_placeholders_from_docx_bytes(file_bytes: bytes):
                 if part in names:
                     xml = z.read(part).decode('utf-8', errors='ignore')
                     all_tokens.extend(_extract_tokens_from_xml(xml))
-            if not all_tokens and 'word/document.xml' in names:
-                xml = z.read('word/document.xml').decode('utf-8', errors='ignore')
-                all_tokens.extend(_extract_tokens_from_xml(xml))
     except Exception as e:
         logger.exception("Erro ao abrir DOCX bytes: %s", e)
         raise
 
-    # duas junções: sem separador (reconstrói placeholders quebrados) e com espaço (reduz colisão de palavras)
-    joined_no_sep = ''.join(all_tokens)
-    joined_space = ' '.join(all_tokens)
+    full_text = ''.join(all_tokens)
 
-    # 1) Captura {% for var in collection %} (padrão simples)
-    for_matches = re.findall(r'\{%\s*for\s+([a-zA-Z_][\w]*)\s+in\s+([a-zA-Z_][\w]*)\s*%}', joined_no_sep, flags=re.DOTALL)
+    # 1. Encontra todos os loops `for var in collection`
+    for_matches = re.findall(r'\{%\s*for\s+([a-zA-Z_][\w]*)\s+in\s+([a-zA-Z_][\w]*)\s*%\}', full_text)
+    loop_variables = {var for var, coll in for_matches}
+    collections = {coll for var, coll in for_matches}
 
-    # 2) Captura {{ var }} e {{ var.attr }} em joined_no_sep (reconstruído)
-    var_matches = re.findall(r'\{\{\s*([a-zA-Z_][\w\.]*)\s*(?:\|[^}]*)?\}\}', joined_no_sep, flags=re.DOTALL)
+    # 2. Encontra todas as variáveis `{{ var }}` ou `{{ var.attr }}`
+    var_matches = re.findall(r'\{\{\s*([a-zA-Z_][\w\.]*)\s*(?:\|[^}]*)?\}\}', full_text)
 
-    dotted = set(var_matches)
-    variables = {v for v in dotted if '.' not in v}
+    # 3. Processa as variáveis encontradas
+    simple_vars = set()
+    dotted_bases = set()
 
-    # for_map: var -> collection
-    for_map = {var: coll for (var, coll) in for_matches}
-
-    bases_from_dotted = {d.split('.')[0] for d in dotted if '.' in d}
-
-    collections = set(for_map.values())
-
-    # substitui bases que são vars de loop por sua collection, p.ex. 'secao' -> 'secoes'
-    substituted_bases = set()
-    for b in bases_from_dotted:
-        if b in for_map:
-            substituted_bases.add(for_map[b])
+    for var in var_matches:
+        if '.' in var:
+            base = var.split('.')[0]
+            dotted_bases.add(base)
         else:
-            substituted_bases.add(b)
+            simple_vars.add(var)
 
-    required_top = collections | variables | substituted_bases
+    # 4. Lógica de Limpeza:
+    # Remove variáveis que são, na verdade, variáveis de loop (ex: 'secao', 'item')
+    # do conjunto de variáveis simples e das bases pontuadas.
+    required_simple_vars = simple_vars - loop_variables
+    required_bases = dotted_bases - loop_variables
+
+    # 5. Monta o resultado final
+    all_required = collections | required_simple_vars | required_bases
 
     return {
-        "variables": sorted(variables),
-        "collections": sorted(collections),
-        "dotted": sorted(dotted),
-        "for_map": for_map,
-        "all_bases": sorted(required_top)
+        "variables": sorted(list(required_simple_vars)),
+        "collections": sorted(list(collections)),
+        "all_required": sorted(list(all_required))
     }

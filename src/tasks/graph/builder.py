@@ -24,7 +24,8 @@ from .nodes import (
     read_document_flow_node,
     create_document_flow_node,
     general_chat_flow_node,
-    final_response_node
+    validate_and_clarify_node,
+    final_response_node   
 )
 
 def build_graph():
@@ -44,6 +45,7 @@ def build_graph():
     workflow.add_node("read_document_flow", read_document_flow_node)
     workflow.add_node("create_document_flow", create_document_flow_node)
     workflow.add_node("general_chat_flow", general_chat_flow_node)
+    workflow.add_node("validator_clarifier", validate_and_clarify_node)
     workflow.add_node("final_responder", final_response_node)
 
     # --- ETAPA 2: Definir o Ponto de Entrada ---
@@ -70,14 +72,25 @@ def build_graph():
     # Após a conclusão de cada fluxo de trabalho principal, todos devem convergir
     # para o nó 'final_responder', que prepara a resposta final para o usuário.
     # Depois do 'final_responder', o fluxo termina.
-    workflow.add_edge('fill_template_flow', 'final_responder')
+    workflow.add_edge('fill_template_flow', 'validator_clarifier')
     workflow.add_edge('read_document_flow', 'final_responder')
     workflow.add_edge('create_document_flow', 'final_responder')
     workflow.add_edge('general_chat_flow', 'final_responder')
     
+    # Adicione uma aresta condicional do validador
+    def after_validation(state: GraphState):
+        if "tool_output" in state and state["tool_output"]:
+            # Se a ferramenta foi chamada, o fluxo está completo
+            return "final_responder"
+        else:
+            # Se recebemos uma pergunta de esclarecimento, o fluxo termina por agora
+            # e a pergunta será a resposta final.
+            return END
+    
+    workflow.add_conditional_edges("validator_clarifier", after_validation)
+    
     # O nó 'final_responder' é o último passo antes de terminar a execução.
     workflow.add_edge('final_responder', END)
-
     # --- ETAPA 5: Compilar o Grafo ---
     # Transforma nossa definição de nós e arestas em um objeto executável.
     app = workflow.compile()

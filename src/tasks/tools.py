@@ -144,12 +144,31 @@ def template_filler_tool(template_name: str, context: dict, owner_id: str, outpu
         template_file = fs.get(gridfs_id)
         file_bytes = template_file.read()
         
-        contexto_limpo = _normalizar_contexto(context) or {}
+        # --- INÍCIO DA CORREÇÃO ---
+        # Antes de renderizar, garantimos que qualquer campo esperado como um loop (coleção)
+        # que esteja nulo no JSON da IA seja convertido em uma lista vazia.
+        
+        # 1. Inspeciona o template para descobrir quais chaves são para loops.
+        placeholders_info = extract_placeholders_from_docx_bytes(file_bytes)
+        collections_expected = placeholders_info.get("collections", [])
+        
+        # 2. Normaliza e sanitiza o contexto recebido da IA.
+        contexto_sanitizado = _normalizar_contexto(context) or {}
+        for collection_name in collections_expected:
+            # Se uma chave esperada para um loop for None (nula), forçamos que ela seja uma lista vazia.
+            if contexto_sanitizado.get(collection_name) is None:
+                logger.warning(
+                    f"O campo de coleção '{collection_name}' estava nulo no JSON da IA. "
+                    f"Convertendo para lista vazia [] para evitar erro de renderização."
+                )
+                contexto_sanitizado[collection_name] = []
+        # --- FIM DA CORREÇÃO ---
 
         try:
             doc = DocxTemplate(io.BytesIO(file_bytes))
             env = Environment(undefined=Undefined)
-            doc.render(contexto_limpo, jinja_env=env)
+            # Usa o contexto sanitizado, que é seguro para loops.
+            doc.render(contexto_sanitizado, jinja_env=env)
             final_doc_stream = io.BytesIO()
             doc.save(final_doc_stream)
             final_doc_stream.seek(0)
@@ -160,7 +179,7 @@ def template_filler_tool(template_name: str, context: dict, owner_id: str, outpu
             return ToolResponse.error(message="Campos necessários ausentes para renderizar o template.", error_code=ErrorCodes.VALIDATION_ERROR, data={"missing_fields": [missing_field] if missing_field else [], "detail": missing_msg}).to_dict()
         except Exception as e:
             logger.exception("Erro ao renderizar template: %s", e)
-            return ToolResponse.error(message=f"Falha ao renderizar o template: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
+            return ToolResponse.error(message=f"Falha ao renderizar o template: {e}", error_code=ErrorCodes.UNKNOWN_ERROR, data={"detail": str(e)}).to_dict()
 
         if not output_filename:
             timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
@@ -226,7 +245,23 @@ def template_inspector_tool(template_name: str) -> Dict[str, Any]:
         file_bytes = fs.get(_to_objectid_if_possible(gridfs_id)).read()
         placeholders_info = extract_placeholders_from_docx_bytes(file_bytes)
 
-        return ToolResponse.success(message=f"Inspeção concluída para {template_name}", data={"template_name": template_name, "required_top_level": placeholders_info["all_bases"]}).to_dict()
+        return ToolResponse.success(
+            message=f"Inspeção concluída para {template_name}",
+            data={
+                "template_name": template_name,
+                "all_required": placeholders_info.get("all_required", []),
+                "collections": placeholders_info.get("collections", []),
+                "variables": placeholders_info.get("variables", []),
+            }
+        ).to_dict()
+
+    except Exception as e:
+        logger.exception("template_inspection_error", template=template_name, error=str(e))
+        return ToolResponse.error(
+            message=f"Erro ao inspecionar o template: {e}",
+            error_code=ErrorCodes.UNKNOWN_ERROR,
+            data={"template_name": template_name}
+        ).to_dict()
     except Exception as e:
         logger.exception("template_inspection_error", template=template_name, error=str(e))
         return ToolResponse.error(message=f"Erro ao inspecionar o template: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()

@@ -62,6 +62,7 @@ class GraphState(TypedDict):
     routed_tool_call: Optional[Dict[str, Any]]
     tool_output: Optional[Dict[str, Any]]
     generation: Optional[Any] # Pode ser string, dict, etc.
+    required_fields: Optional[List[str]]
 
     # --- Atributos de Saída ---
     final_response: Optional[str]
