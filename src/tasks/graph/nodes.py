@@ -17,10 +17,12 @@ Esta abordagem modular torna o sistema fácil de entender, manter e estender.
 import json
 import re
 from typing import Dict, Any
+from pydantic import BaseModel, Field
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.output_parsers import PydanticOutputParser
 
 from src.config import Config
 from .state import GraphState
@@ -52,6 +54,14 @@ except Exception as e:
     llm = None
 
 # --- Helper Functions (Extraídas do antigo ia_processor) ---
+
+class TemplateOutput(BaseModel):
+    suggested_filename: str = Field(description="Um nome de arquivo lógico e descritivo em formato snake_case, terminando em .docx. Ex: relatorio_inspecao_global_corp.docx")
+    context: dict = Field(description="O dicionário JSON com as chaves e valores para preencher o template.")
+
+class DocumentOutput(BaseModel):
+    suggested_filename: str = Field(description="Um nome de arquivo lógico e descritivo em formato snake_case, com a extensão correta (.docx, .xlsx, ou .pdf).")
+    content: str = Field(description="O conteúdo textual completo para o corpo do documento.")
 
 def _get_template_name_from_state(state: GraphState) -> str | None:
     """Extrai o nome do arquivo do template do prompt do usuário."""
@@ -125,7 +135,7 @@ def fill_template_flow_node(state: GraphState) -> Dict[str, Any]:
     - Estrutura de Dados Requerida (Chaves do JSON): {required_fields}
     - Desses campos, os seguintes são LISTAS (para loops): {collections_fields}
 
-    **TAREFA:** Preencha o JSON abaixo. Você deve seguir a "Lógica de Preenchimento Híbrida".
+    **TAREFA:** Preencha o JSON abaixo. Você deve seguir a "Lógica de Preenchimento Híbrida e Sugerir um nome de arquivo (`suggested_filename`) descritivo, em `snake_case`, terminando em `.docx`. O nome deve refletir o tópico principal do documento.".
 
     **LÓGICA DE PREENCHIMENTO HÍBRIDA (REGRAS CRÍTICAS):**
 
@@ -192,24 +202,45 @@ def fill_template_flow_node(state: GraphState) -> Dict[str, Any]:
           }}
           ```
 
-    **FORMATO DE SAÍDA OBRIGATÓRIO:** Responda APENAS com o bloco JSON.
+    **EXEMPLO DE RACIOCÍNIO E SAÍDA:**
+    - Solicitação do Usuário: "Crie um relatório para a Global Corp sobre inspeção de drones."
+    - Seu Raciocínio: "O tópico é 'inspeção de drones para a Global Corp'. Um bom nome de arquivo seria 'relatorio_inspecao_drones_global_corp.docx'. Vou gerar o conteúdo para os campos de texto e deixar os dados tabulares vazios."
+    - Saída JSON Correta (Exemplo):
+      ```json
+      {{
+        "suggested_filename": "relatorio_inspecao_drones_global_corp.docx",
+        "context": {{
+          "titulo_documento": "Relatório de Inspeção com Drones",
+          "subtitulo_documento": "Cliente: Global Corp",
+          "data_documento": "31 de Outubro de 2025",
+          "sumario_documento": "Este documento detalha os resultados da inspeção...",
+          "secoes": [],
+          "dados_coletados": [],
+          "texto_conclusao": "A inspeção foi um sucesso."
+        }}
+      }}
+      ```
+
+    **FORMATO DE SAÍDA OBRIGATÓRIO:** Responda APENAS com o bloco JSON estruturado com as chaves 'suggested_filename' e 'context'.
     """
     
-    parser = JsonOutputParser()
+    parser = PydanticOutputParser(pydantic_object=TemplateOutput)
     chain = llm | parser
     
     try:
-        generated_json = chain.invoke(prompt_template)
+        # A saída do LLM agora será um objeto Pydantic TemplateOutput
+        output_object = chain.invoke(prompt_template)
+        generated_json = output_object.context
+        suggested_filename = output_object.suggested_filename
     except Exception as e:
-        logger.error("Falha ao gerar ou parsear o JSON do LLM para o template.", error=str(e))
-        return {
-            "final_response": "Tive um problema ao gerar o conteúdo para o seu documento. Você poderia tentar reformular seu pedido?"
-        }
+        logger.error("Falha ao gerar ou parsear o JSON estruturado do LLM.", error=str(e))
+        return { "final_response": "Tive um problema ao gerar o conteúdo para o seu documento." }
 
-    # Agora, o JSON gerado é passado para o nó de validação, que irá chamar a ferramenta.
+    # Passa o JSON e o nome do arquivo para o próximo nó
     return {
-        "generation": generated_json, 
-        "required_fields": required_fields
+        "generation": generated_json,
+        "required_fields": required_fields,
+        "suggested_filename": suggested_filename
     }
 
 def read_document_flow_node(state: GraphState) -> Dict[str, Any]:
@@ -256,23 +287,23 @@ def read_document_flow_node(state: GraphState) -> Dict[str, Any]:
 
 def create_document_flow_node(state: GraphState) -> Dict[str, Any]:
     """
-    Executa o fluxo para criar um documento simples (docx, xlsx, pdf) do zero.
+    Executa o fluxo para criar um documento simples (docx, xlsx, pdf) do zero,
+    extraindo corretamente o conteúdo do JSON gerado pela IA.
     """
     logger.info("Executando create_document_flow_node", conversation_id=state["conversation_id"])
     tool_args = state["routed_tool_call"]["args"]
     topic = tool_args.get("topic")
     file_type = tool_args.get("file_type")
-    
-    # 1. Usar o LLM para gerar o conteúdo textual
+
+    # --- O PROMPT PERMANECE O MESMO, pois já está instruindo a IA a gerar o JSON corretamente ---
     prompt = f"""
-    **PERSONA:** Você é um Gerador de Conteúdo e Redator Especialista. Sua tarefa é criar o corpo de um documento com base em uma solicitação.
+    **PERSONA:** Você é um Gerador de Conteúdo e Redator Especialista.
 
-    **BRIEFING DA TAREFA:**
-    - Tópico Principal: "{topic}"
-    - Formato do Arquivo de Destino: "{file_type}"
-    - Contexto da Conversa Anterior (para referência): {state['conversation_history'][-3:]}
+    **BRIEFING DA TAREFA:** Sua tarefa é dupla:
+    1.  Escrever o conteúdo textual completo para um documento sobre o tópico: "{topic}".
+    2.  Sugerir um nome de arquivo (`suggested_filename`) descritivo, em `snake_case`, com a extensão `.{file_type}`.
 
-    **MANUAL DE GERAÇÃO DE CONTEÚDO:**
+        **MANUAL DE GERAÇÃO DE CONTEÚDO:**
     - **Se o formato de destino for `xlsx`:**
         - Sua resposta DEVE ser um conjunto de dados tabulares.
         - Use ponto e vírgula (;) como separador de colunas.
@@ -285,29 +316,39 @@ def create_document_flow_node(state: GraphState) -> Dict[str, Any]:
         - Use parágrafos, títulos (se aplicável) e linguagem apropriada para o tópico.
         - **Exemplo de Saída para Texto:**
           `Relatório de Vendas Q3\\n\\nO terceiro trimestre apresentou um crescimento notável...`
-
-    **REGRAS DE OURO:**
-    1.  Sua saída deve ser **APENAS o conteúdo bruto** a ser inserido no arquivo.
-    2.  NÃO inclua nenhum texto introdutório, conclusões ou metadados como "Aqui está o conteúdo:".
-    3.  A qualidade e a relevância do conteúdo em relação ao tópico são primordiais.
-
-    **FORMATO DE SAÍDA:** Texto bruto.
+          
+    **EXEMPLO DE SAÍDA:**
+    - Solicitação: "Faça uma planilha com os planetas do sistema solar"
+    - Formato Final: "xlsx"
+    - Saída JSON Correta:
+      ```json
+      {{
+        "suggested_filename": "planetas_sistema_solar.xlsx",
+        "content": "Nome;Diametro (km)\\nMercúrio;4879\\nVênus;12104"
+      }}
+      ```
+      
+    **FORMATO DE SAÍDA OBRIGATÓRIO:** Responda APENAS com o bloco JSON estruturado com as chaves 'suggested_filename' e 'content'.
     """
-    generated_content = llm.invoke(prompt).content
 
-    # 2. Determinar a extensão e chamar a ferramenta
-    prompt_lower = state["prompt"].lower()
-    if any(k in prompt_lower for k in ['xlsx', 'planilha', 'excel']):
-        ext = 'xlsx'
-    elif 'pdf' in prompt_lower:
-        ext = 'pdf'
-    else:
-        ext = 'docx' # Padrão
-    
-    filename = f"documento_gerado_{state['conversation_id'][-6:]}.{ext}"
+    # --- CORREÇÃO APLICADA AQUI ---
+    parser = PydanticOutputParser(pydantic_object=DocumentOutput)
+    chain = llm | parser
 
+    try:
+        # 2. Invocar a cadeia e obter um objeto Pydantic, não uma string.
+        output_object = chain.invoke(prompt)
+        
+        # 3. Extrair os valores do objeto, em vez de usar a string bruta.
+        generated_content = output_object.content
+        suggested_filename = output_object.suggested_filename
+    except Exception as e:
+        logger.error("Falha ao gerar ou parsear o JSON estruturado do LLM para documento simples.", error=str(e))
+        return { "final_response": "Tive um problema ao gerar o conteúdo para o seu documento." }
+
+    # A lógica abaixo agora usa as variáveis extraídas corretamente.
     creator_result = simple_document_generator_tool.invoke({
-        "output_filename": filename,
+        "output_filename": suggested_filename,
         "content": generated_content,
         "owner_id": state["user_id"]
     })
@@ -433,10 +474,12 @@ def validate_and_clarify_node(state: GraphState) -> Dict[str, Any]:
         # Se o JSON for bom, chama a ferramenta de preenchimento
         tool_args = state["routed_tool_call"]["args"]
         template_name = tool_args.get("template_name")
+        suggested_filename = state.get("suggested_filename")
         
         filler_result = template_filler_tool.invoke({
             "template_name": template_name,
             "context": generated_json,
-            "owner_id": state["user_id"]
+            "owner_id": state["user_id"],
+            "output_filename": suggested_filename
         })
         return {"tool_output": filler_result}

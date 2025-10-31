@@ -67,3 +67,4 @@ class GraphState(TypedDict):
     # --- Atributos de Saída ---
     final_response: Optional[str]
     generated_document_id: Optional[str]
+    suggested_filename: Optional[str]
