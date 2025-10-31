@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 import pandas as pd
+import fitz
 from bson import ObjectId
 from bson.errors import InvalidId
 from docx import Document
@@ -114,9 +115,33 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
         elif filename.endswith((".xlsx", ".xls")):
             df = pd.read_excel(io.BytesIO(gridfs_file.read()))
             return ToolResponse.success(message="Planilha Excel lida com sucesso", data={"filename": doc_meta.get("filename"), "content_markdown": df.to_markdown(index=False), "content_type": "excel"}).to_dict()
+
+        elif filename.endswith(".pdf"):
+            try:
+                # Abre o PDF a partir dos bytes em memória
+                with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+                    full_text = ""
+                    # Itera sobre cada página do PDF
+                    for page in doc:
+                        # Extrai o texto da página e o adiciona à variável
+                        full_text += page.get_text()
+                
+                logger.info(f"PDF '{filename}' lido com sucesso. Extraídos {len(full_text)} caracteres.")
+                return ToolResponse.success(
+                    message="Documento PDF lido com sucesso.",
+                    data={
+                        "filename": doc_meta.get("filename"),
+                        "content": full_text,
+                        "content_type": "pdf"
+                    }
+                ).to_dict()
+            except Exception as e:
+                logger.error(f"Erro ao processar o arquivo PDF '{filename}'.", error=str(e))
+                return ToolResponse.error(message=f"Não foi possível ler o conteúdo do arquivo PDF. Ele pode estar corrompido ou ser baseado em imagem.", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
         
         else:
-            return ToolResponse.error(message=f"O arquivo '{doc_meta.get('filename')}' não é de um tipo suportado (DOCX, XLSX).", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
+            return ToolResponse.error(message=f"O arquivo '{doc_meta.get('filename')}' não é de um tipo suportado (DOCX, XLSX, PDF).", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
+            
     except Exception as e:
         logger.exception("tool_error", tool="file_reader_tool", error=str(e))
         return ToolResponse.error(message=f"Erro excepcional ao ler o arquivo: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
