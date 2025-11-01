@@ -25,6 +25,7 @@ from typing import Dict, Any, Optional
 
 import pandas as pd
 import fitz
+import json
 from bson import ObjectId
 from bson.errors import InvalidId
 from docx import Document
@@ -108,39 +109,74 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
         filename = doc_meta.get("filename", "").lower()
 
         if filename.endswith(".docx"):
-            doc = Document(io.BytesIO(gridfs_file.read()))
+            doc = Document(io.BytesIO(file_bytes))
             full_text = "\n".join([para.text for para in doc.paragraphs])
             return ToolResponse.success(message="Documento DOCX lido com sucesso", data={"filename": doc_meta.get("filename"), "content": full_text, "content_type": "docx"}).to_dict()
         
         elif filename.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(gridfs_file.read()))
-            return ToolResponse.success(message="Planilha Excel lida com sucesso", data={"filename": doc_meta.get("filename"), "content_markdown": df.to_markdown(index=False), "content_type": "excel"}).to_dict()
-
+            df = pd.read_excel(io.BytesIO(file_bytes))
+            content_str = df.to_string(index=False)
+            return ToolResponse.success(message="Planilha Excel lida com sucesso", data={"filename": doc_meta.get("filename"), "content": content_str, "content_type": "excel"}).to_dict()
+        
         elif filename.endswith(".pdf"):
             try:
-                # Abre o PDF a partir dos bytes em memória
                 with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-                    full_text = ""
-                    # Itera sobre cada página do PDF
-                    for page in doc:
-                        # Extrai o texto da página e o adiciona à variável
-                        full_text += page.get_text()
-                
+                    full_text = "".join(page.get_text() for page in doc)
                 logger.info(f"PDF '{filename}' lido com sucesso. Extraídos {len(full_text)} caracteres.")
-                return ToolResponse.success(
-                    message="Documento PDF lido com sucesso.",
-                    data={
-                        "filename": doc_meta.get("filename"),
-                        "content": full_text,
-                        "content_type": "pdf"
-                    }
-                ).to_dict()
+                return ToolResponse.success(message="Documento PDF lido com sucesso.", data={"filename": doc_meta.get("filename"), "content": full_text, "content_type": "pdf"}).to_dict()
             except Exception as e:
                 logger.error(f"Erro ao processar o arquivo PDF '{filename}'.", error=str(e))
                 return ToolResponse.error(message=f"Não foi possível ler o conteúdo do arquivo PDF. Ele pode estar corrompido ou ser baseado em imagem.", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
+
+        # --- NOVA LÓGICA PARA TXT ---
+        elif filename.endswith(".txt"):
+            try:
+                # Decodifica os bytes para uma string de texto, tentando utf-8 primeiro.
+                full_text = file_bytes.decode('utf-8')
+                return ToolResponse.success(
+                    message="Arquivo de texto (.txt) lido com sucesso.",
+                    data={"filename": doc_meta.get("filename"), "content": full_text, "content_type": "text/plain"}
+                ).to_dict()
+            except UnicodeDecodeError:
+                # Fallback para outra codificação comum se utf-8 falhar.
+                full_text = file_bytes.decode('latin-1')
+                return ToolResponse.success(
+                    message="Arquivo de texto (.txt) lido com sucesso (usando codificação latin-1).",
+                    data={"filename": doc_meta.get("filename"), "content": full_text, "content_type": "text/plain"}
+                ).to_dict()
+        
+        # --- NOVA LÓGICA PARA CSV ---
+        elif filename.endswith(".csv"):
+            try:
+                # Usa o Pandas para ler o CSV diretamente dos bytes.
+                df = pd.read_csv(io.BytesIO(file_bytes))
+                content_str = df.to_string(index=False)
+                return ToolResponse.success(
+                    message="Arquivo CSV lido com sucesso.",
+                    data={"filename": doc_meta.get("filename"), "content": content_str, "content_type": "text/csv"}
+                ).to_dict()
+            except Exception as e:
+                logger.error(f"Erro ao processar o arquivo CSV '{filename}'.", error=str(e))
+                return ToolResponse.error(message=f"Não foi possível ler o conteúdo do arquivo CSV. Verifique se a formatação está correta.", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
+
+        # --- NOVA LÓGICA PARA JSON ---
+        elif filename.endswith(".json"):
+            try:
+                # Decodifica os bytes e depois faz o parse do JSON.
+                full_text = file_bytes.decode('utf-8')
+                json_data = json.loads(full_text)
+                # Converte o JSON de volta para uma string formatada (pretty-printed) para o LLM ler.
+                content_str = json.dumps(json_data, indent=2, ensure_ascii=False)
+                return ToolResponse.success(
+                    message="Arquivo JSON lido com sucesso.",
+                    data={"filename": doc_meta.get("filename"), "content": content_str, "content_type": "application/json"}
+                ).to_dict()
+            except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                logger.error(f"Erro ao processar o arquivo JSON '{filename}'.", error=str(e))
+                return ToolResponse.error(message=f"Não foi possível ler o conteúdo do arquivo JSON. Verifique se o arquivo está bem formatado e com codificação UTF-8.", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
         
         else:
-            return ToolResponse.error(message=f"O arquivo '{doc_meta.get('filename')}' não é de um tipo suportado (DOCX, XLSX, PDF).", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
+            return ToolResponse.error(message=f"O arquivo '{doc_meta.get('filename')}' não é de um tipo suportado (DOCX, XLSX, PDF, TXT, CSV, JSON).", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
             
     except Exception as e:
         logger.exception("tool_error", tool="file_reader_tool", error=str(e))
