@@ -245,11 +245,13 @@ def fill_template_flow_node(state: GraphState) -> Dict[str, Any]:
 
 def read_document_flow_node(state: GraphState) -> Dict[str, Any]:
     """
-    Executa o fluxo de leitura de um documento anexado e resume seu conteúdo.
+    Executa o fluxo de leitura de um documento anexado, adaptando o prompt
+    da IA com base no tipo de conteúdo do arquivo (texto, tabela, json, etc.).
     """
     logger.info("Executando read_document_flow_node", conversation_id=state["conversation_id"])
     document_id = state.get("input_document_id")
-    question = state["routed_tool_call"]["args"].get("question")
+    # Se o roteador não extraiu uma pergunta específica, usamos o prompt inteiro do usuário.
+    question = state["routed_tool_call"]["args"].get("question", state["prompt"])
 
     if not document_id:
         return {"final_response": "Por favor, anexe um documento para que eu possa lê-lo."}
@@ -259,30 +261,60 @@ def read_document_flow_node(state: GraphState) -> Dict[str, Any]:
     if reader_result.get("status") == "error":
         return {"tool_output": reader_result}
 
-    file_content = reader_result.get("data", {}).get("content", "")
+    reader_data = reader_result.get("data", {})
+    file_content = reader_data.get("content", "")
+    content_type = reader_data.get("content_type", "text")  # Ex: 'excel', 'pdf', 'csv'...
+
+    # Verifica se o conteúdo extraído está vazio.
+    if not file_content or not file_content.strip():
+        return {"final_response": "O documento parece estar vazio ou não contém texto para ser lido."}
+
+    # --- INÍCIO DA LÓGICA DE PROMPT DINÂMICO ---
     
-    # 2. Usar o LLM para resumir ou responder com base no conteúdo
-    prompt = f"""
-    **PERSONA:** Você é um Assistente de Pesquisa e Análise Documental.
+    # 2. Define a Persona e Instruções Específicas com base no tipo de conteúdo
+    if content_type in ["excel", "csv"]:
+        persona_and_instructions = """
+        **PERSONA:** Você é um Analista de Dados especialista em interpretar dados tabulares apresentados em formato de texto.
+        
+        **INSTRUÇÕES ADICIONAIS:** A "Fonte de Verdade" abaixo é uma tabela. Analise sua estrutura de colunas e linhas para responder à pergunta. Você tem permissão para fazer inferências, raciocinar e executar cálculos simples (somas, contagens, encontrar valores máximos/mínimos) com base nos dados da tabela para chegar à resposta correta.
+        """
+    elif content_type == "json":
+        persona_and_instructions = """
+        **PERSONA:** Você é um Engenheiro de Software especialista em estruturas de dados.
+        
+        **INSTRUÇÕES ADICIONAIS:** A "Fonte de Verdade" é um documento JSON. Navegue pela estrutura de chaves, valores, objetos e listas para encontrar a informação solicitada.
+        """
+    else:  # Para 'docx', 'pdf', 'txt' e outros tipos de texto puro
+        persona_and_instructions = """
+        **PERSONA:** Você é um Assistente de Pesquisa especialista em análise textual.
+        
+        **INSTRUÇÕES ADICIONAIS:** Leia e interprete o texto a seguir para encontrar a resposta para a pergunta do usuário.
+        """
 
-    **FONTE DE VERDADE (Source of Truth):**
-    ---INÍCIO DO DOCUMENTO---
-    {file_content[:15000]} # Limita o contexto para evitar exceder limites de token
-    ---FIM DO DOCUMENTO---
+    # 3. Monta o prompt final combinando as partes
+    base_prompt_template = """
+    **CONTEXTO:**
+    - Pergunta do Usuário: '{question}'
+    - Conteúdo do Documento Anexado (Fonte de Verdade):
+    ---
+    {file_content}
+    ---
 
-    **TAREFA:** Com base **EXCLUSIVAMENTE** na "Fonte de Verdade" acima, responda à seguinte pergunta do usuário:
-    - Pergunta: "{question}"
+    **TAREFA:** Com base **EXCLUSIVAMENTE** na "Fonte de Verdade" acima, responda à pergunta do usuário.
 
     **PROTOCOLO DE RESPOSTA (REGRAS CRÍTICAS):**
-    1.  **Fidelidade à Fonte:** Sua resposta deve ser 100% baseada no texto fornecido. NÃO use conhecimento prévio ou externo.
-    2.  **Citação (se possível):** Se você encontrar a resposta, tente citar um trecho curto do documento que a comprove.
-    3.  **Tratamento de Ausência:** Se a resposta à pergunta não estiver explicitamente contida na "Fonte de Verdade", sua única resposta permitida é: "Com base na análise do documento, não encontrei uma resposta para a sua pergunta."
-    4.  **Clareza e Concisão:** Seja direto. Evite frases como "Com base no documento..." a menos que seja para citar.
-
-    **FORMATO DE SAÍDA:** Uma resposta textual clara.
+    1.  NÃO utilize conhecimento externo ou informações da internet.
+    2.  Se a resposta não puder ser encontrada ou inferida a partir dos dados do documento, sua única resposta permitida é: "Com base na análise do documento, não encontrei uma resposta para a sua pergunta."
+    3.  Seja direto e preciso em sua resposta. Forneça o resultado final sem explicações excessivas sobre como você chegou a ele, a menos que a pergunta peça isso.
     """
 
-    response = llm.invoke(prompt)
+    full_prompt = persona_and_instructions + base_prompt_template
+    
+    # Formata o prompt com os dados reais, limitando o tamanho do conteúdo para evitar exceder limites de token
+    final_prompt_text = full_prompt.format(question=question, file_content=file_content[:15000])
+    
+    # 4. Usar o LLM para responder com base no prompt contextualizado
+    response = llm.invoke(final_prompt_text)
     return {"final_response": response.content}
 
 def create_document_flow_node(state: GraphState) -> Dict[str, Any]:
