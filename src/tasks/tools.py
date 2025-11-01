@@ -88,10 +88,11 @@ class DatabaseQueryInput(BaseModel):
 @tool(args_schema=FileReaderInput)
 @track_performance
 def file_reader_tool(document_id: str) -> Dict[str, Any]:
-    """Use para ler o conteúdo de um arquivo DOCX ou XLSX. Forneça o ID do metadado do documento."""
+    """Use para ler o conteúdo de um arquivo DOCX, XLSX, PDF, TXT, CSV ou JSON. Forneça o ID do metadado do documento."""
     logger.info("tool_executed", tool="file_reader_tool", document_id=document_id)
     db = get_db()
     fs = get_gridfs()
+    gridfs_file = None  # Inicializa a variável para garantir que ela exista no bloco finally
     try:
         doc_oid = _to_objectid_if_possible(document_id)
         if not isinstance(doc_oid, ObjectId):
@@ -109,17 +110,20 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
         filename = doc_meta.get("filename", "").lower()
 
         if filename.endswith(".docx"):
+            file_bytes = gridfs_file.read()
             doc = Document(io.BytesIO(file_bytes))
             full_text = "\n".join([para.text for para in doc.paragraphs])
             return ToolResponse.success(message="Documento DOCX lido com sucesso", data={"filename": doc_meta.get("filename"), "content": full_text, "content_type": "docx"}).to_dict()
         
         elif filename.endswith((".xlsx", ".xls")):
+            file_bytes = gridfs_file.read()
             df = pd.read_excel(io.BytesIO(file_bytes))
             content_str = df.to_string(index=False)
             return ToolResponse.success(message="Planilha Excel lida com sucesso", data={"filename": doc_meta.get("filename"), "content": content_str, "content_type": "excel"}).to_dict()
         
         elif filename.endswith(".pdf"):
             try:
+                file_bytes = gridfs_file.read()
                 with fitz.open(stream=file_bytes, filetype="pdf") as doc:
                     full_text = "".join(page.get_text() for page in doc)
                 logger.info(f"PDF '{filename}' lido com sucesso. Extraídos {len(full_text)} caracteres.")
@@ -131,14 +135,15 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
         # --- NOVA LÓGICA PARA TXT ---
         elif filename.endswith(".txt"):
             try:
-                # Decodifica os bytes para uma string de texto, tentando utf-8 primeiro.
+                file_bytes = gridfs_file.read()
                 full_text = file_bytes.decode('utf-8')
                 return ToolResponse.success(
                     message="Arquivo de texto (.txt) lido com sucesso.",
                     data={"filename": doc_meta.get("filename"), "content": full_text, "content_type": "text/plain"}
                 ).to_dict()
             except UnicodeDecodeError:
-                # Fallback para outra codificação comum se utf-8 falhar.
+                # O fallback também precisa ler os bytes, então garantimos que ele tenha acesso
+                file_bytes = gridfs_file.read() if gridfs_file.tell() > 0 else file_bytes
                 full_text = file_bytes.decode('latin-1')
                 return ToolResponse.success(
                     message="Arquivo de texto (.txt) lido com sucesso (usando codificação latin-1).",
@@ -148,7 +153,7 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
         # --- NOVA LÓGICA PARA CSV ---
         elif filename.endswith(".csv"):
             try:
-                # Usa o Pandas para ler o CSV diretamente dos bytes.
+                file_bytes = gridfs_file.read()
                 df = pd.read_csv(io.BytesIO(file_bytes))
                 content_str = df.to_string(index=False)
                 return ToolResponse.success(
@@ -162,7 +167,7 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
         # --- NOVA LÓGICA PARA JSON ---
         elif filename.endswith(".json"):
             try:
-                # Decodifica os bytes e depois faz o parse do JSON.
+                file_bytes = gridfs_file.read()
                 full_text = file_bytes.decode('utf-8')
                 json_data = json.loads(full_text)
                 # Converte o JSON de volta para uma string formatada (pretty-printed) para o LLM ler.
@@ -181,6 +186,10 @@ def file_reader_tool(document_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("tool_error", tool="file_reader_tool", error=str(e))
         return ToolResponse.error(message=f"Erro excepcional ao ler o arquivo: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
+    finally:
+        # Garante que o arquivo GridFS seja fechado para liberar recursos.
+        if gridfs_file:
+            gridfs_file.close()
 
 
 @tool(args_schema=TemplateFillerInput)
