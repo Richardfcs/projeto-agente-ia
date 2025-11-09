@@ -42,3 +42,8 @@ flask-swagger-ui==5.21.0
 pydantic==2.11.9
 Jinja2==3.1.6
 structlog==25.4.0
+
+# Para conversão de Markdown
+markdown-it-py==4.0.0
+html2docx==0.2.17
+xhtml2pdf==1.6.0

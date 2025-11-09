@@ -22,7 +22,9 @@ from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableParallel
 
 from src.config import Config
 from .state import GraphState
@@ -32,9 +34,12 @@ from src.tasks.tools import (
     template_inspector_tool,
     template_filler_tool,
     file_reader_tool,
-    simple_document_generator_tool,
 )
 from src.utils.observability import log_with_context
+
+from src.utils.markdown_converter import convert_markdown_to_docx_stream, convert_markdown_to_pdf_stream
+from src.tasks.file_generators import criar_xlsx_stream # Usaremos a de xlsx diretamente aqui
+from src.tasks.tools import save_file_tool # Importe a nova ferramenta
 
 logger = log_with_context(component="GraphNodes")
 
@@ -319,73 +324,101 @@ def read_document_flow_node(state: GraphState) -> Dict[str, Any]:
 
 def create_document_flow_node(state: GraphState) -> Dict[str, Any]:
     """
-    Executa o fluxo para criar um documento simples (docx, xlsx, pdf) do zero,
-    extraindo corretamente o conteúdo do JSON gerado pela IA.
+    Executa o fluxo de criação de documentos com uma abordagem robusta de "Separação de Responsabilidades":
+    1. Gera o conteúdo em Markdown (ou texto tabular) em uma chamada de LLM.
+    2. Gera o nome do arquivo em outra chamada de LLM (executado em paralelo).
+    3. Combina os resultados em Python para a conversão e salvamento.
     """
-    logger.info("Executando create_document_flow_node", conversation_id=state["conversation_id"])
+    logger.info("Executando create_document_flow_node (com Separação de Responsabilidades)", conversation_id=state["conversation_id"])
     tool_args = state["routed_tool_call"]["args"]
     topic = tool_args.get("topic")
     file_type = tool_args.get("file_type")
 
-    # --- O PROMPT PERMANECE O MESMO, pois já está instruindo a IA a gerar o JSON corretamente ---
-    prompt = f"""
-    **PERSONA:** Você é um Gerador de Conteúdo e Redator Especialista.
-
-    **BRIEFING DA TAREFA:** Sua tarefa é dupla:
-    1.  Escrever o conteúdo textual completo para um documento sobre o tópico: "{topic}".
-    2.  Sugerir um nome de arquivo (`suggested_filename`) descritivo, em `snake_case`, com a extensão `.{file_type}`.
-
-        **MANUAL DE GERAÇÃO DE CONTEÚDO:**
-    - **Se o formato de destino for `xlsx`:**
-        - Sua resposta DEVE ser um conjunto de dados tabulares.
-        - Use ponto e vírgula (;) como separador de colunas.
-        - Use uma nova linha (`\\n`) como separador de linhas.
-        - A primeira linha DEVE ser o cabeçalho das colunas.
-        - **Exemplo de Saída para Planilha:**
-          `Nome do Produto;Categoria;Preço\\nCaneta Azul;Papelaria;1.50\\nCaderno 100 fls;Papelaria;15.00`
-    - **Se o formato de destino for `docx` ou `pdf`:**
-        - Escreva um texto coerente, bem estruturado e discursivo.
-        - Use parágrafos, títulos (se aplicável) e linguagem apropriada para o tópico.
-        - **Exemplo de Saída para Texto:**
-          `Relatório de Vendas Q3\\n\\nO terceiro trimestre apresentou um crescimento notável...`
-          
-    **EXEMPLO DE SAÍDA:**
-    - Solicitação: "Faça uma planilha com os planetas do sistema solar"
-    - Formato Final: "xlsx"
-    - Saída JSON Correta:
-      ```json
-      {{
-        "suggested_filename": "planetas_sistema_solar.xlsx",
-        "content": "Nome;Diametro (km)\\nMercúrio;4879\\nVênus;12104"
-      }}
-      ```
-      
-    **FORMATO DE SAÍDA OBRIGATÓRIO:** Responda APENAS com o bloco JSON estruturado com as chaves 'suggested_filename' e 'content'.
-    """
-
-    # --- CORREÇÃO APLICADA AQUI ---
-    parser = PydanticOutputParser(pydantic_object=DocumentOutput)
-    chain = llm | parser
+    # --- INÍCIO DA NOVA ARQUITETURA DE GERAÇÃO ---
 
     try:
-        # 2. Invocar a cadeia e obter um objeto Pydantic, não uma string.
-        output_object = chain.invoke(prompt)
+        # TAREFA 1: CADEIA PARA GERAR APENAS O CONTEÚDO
+        content_prompt = ChatPromptTemplate.from_template(
+            """
+            **PERSONA:** Você é um Redator Especialista que estrutura todo o seu conteúdo usando Markdown para garantir uma formatação rica.
+            
+            **TAREFA:** Escreva um conteúdo textual completo e detalhado sobre o tópico: "{topic}".
+            
+            **REGRAS DE FORMATAÇÃO DO CONTEÚDO:**
+            - Se o formato de destino final for `docx` ou `pdf`, VOCÊ DEVE USAR SINTAXE MARKDOWN (títulos com '#', negrito com '**', listas com '-',  `---` para criar linhas de separação, `| Cabeçalho |` ... para criar tabelas simples, ``` para blocos de código e `código inline` etc.).
+            - Se o formato de destino final for `xlsx`, sua saída deve ser texto tabular (cabeçalho na primeira linha, colunas separadas por ';', e `\\n` para novas linhas).
+            
+            **IMPORTANTE:** Sua resposta deve conter APENAS o conteúdo bruto, sem nenhum comentário ou texto introdutório.
+            """
+        )
+        content_chain = content_prompt | llm | StrOutputParser()
+
+        # TAREFA 2: CADEIA PARA GERAR APENAS O NOME DO ARQUIVO
+        filename_prompt = ChatPromptTemplate.from_template(
+            """
+            **PERSONA:** Você é um assistente de arquivamento de IA.
+            
+            **TAREFA:** Com base no tópico a seguir, sugira um nome de arquivo curto, descritivo e em `snake_case`.
+            
+            **REGRAS:**
+            1. O nome do arquivo DEVE ter a extensão `.{file_type}`.
+            2. A resposta deve conter APENAS o nome do arquivo e nada mais.
+            
+            **TÓPICO:** "{topic}"
+            """
+        )
+        filename_chain = filename_prompt | llm | StrOutputParser()
+
+        # EXECUTAR AMBAS AS TAREFAS EM PARALELO PARA EFICIÊNCIA
+        # O resultado será um dicionário como {'content': '...', 'suggested_filename': '...'}
+        chain = RunnableParallel(
+            content=content_chain,
+            suggested_filename=filename_chain,
+        )
         
-        # 3. Extrair os valores do objeto, em vez de usar a string bruta.
-        generated_content = output_object.content
-        suggested_filename = output_object.suggested_filename
+        # Invoca a cadeia paralela
+        generation_result = chain.invoke({"topic": topic, "file_type": file_type})
+        
+        generated_content = generation_result["content"]
+        suggested_filename = generation_result["suggested_filename"].strip().replace(" ", "_") # Limpeza extra
+
+        # Validação para garantir que o nome do arquivo está limpo e com a extensão correta
+        if not suggested_filename.endswith(f'.{file_type}'):
+             base_name = ".".join(suggested_filename.split('.')[:-1]) or suggested_filename
+             suggested_filename = f"{base_name}.{file_type}"
+
+
     except Exception as e:
-        logger.error("Falha ao gerar ou parsear o JSON estruturado do LLM para documento simples.", error=str(e))
+        logger.error(f"Falha ao gerar conteúdo ou nome de arquivo do LLM.", error=str(e))
         return { "final_response": "Tive um problema ao gerar o conteúdo para o seu documento." }
 
-    # A lógica abaixo agora usa as variáveis extraídas corretamente.
-    creator_result = simple_document_generator_tool.invoke({
-        "output_filename": suggested_filename,
-        "content": generated_content,
-        "owner_id": state["user_id"]
-    })
+    # --- FIM DA NOVA ARQUITETURA DE GERAÇÃO ---
 
-    return {"tool_output": creator_result}
+    # --- LÓGICA DE CONVERSÃO E SALVAMENTO (Mantida da sua implementação) ---
+    
+    file_stream = None
+    try:
+        if file_type == 'docx':
+            file_stream = convert_markdown_to_docx_stream(generated_content)
+        elif file_type == 'pdf':
+            file_stream = convert_markdown_to_pdf_stream(generated_content)
+        elif file_type == 'xlsx':
+            topicos = [line for line in generated_content.split('\n') if line]
+            file_stream = criar_xlsx_stream(topicos, filename=suggested_filename)
+        
+        if file_stream:
+            save_result = save_file_tool.invoke({
+                "filename": suggested_filename,
+                "content_stream": file_stream.getvalue(),
+                "owner_id": state["user_id"]
+            })
+            return {"tool_output": save_result}
+        else:
+            raise ValueError(f"Tipo de arquivo não suportado para geração: {file_type}")
+
+    except Exception as e:
+        logger.exception("Erro durante a conversão ou salvamento do arquivo.", error=str(e))
+        return {"final_response": f"Desculpe, ocorreu um erro ao formatar e salvar o seu documento {file_type}."}
 
 def general_chat_flow_node(state: GraphState) -> Dict[str, Any]:
     """

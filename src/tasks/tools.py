@@ -36,7 +36,7 @@ from langchain_core.tools import tool
 
 from src.db.mongo import get_db, get_gridfs
 from src.models.tool_response import ToolResponse, ErrorCodes
-from src.tasks.file_generators import criar_docx_stream, criar_xlsx_stream, criar_pdf_stream
+from src.tasks.file_generators import criar_xlsx_stream
 from src.utils.docx_placeholders import extract_placeholders_from_docx_bytes
 from src.utils.observability import log_with_context, track_performance
 
@@ -72,10 +72,10 @@ class TemplateFillerInput(BaseModel):
     owner_id: str = Field(description="ID do usuário dono do novo documento")
     output_filename: Optional[str] = Field(default=None, description="Nome do arquivo a ser gerado (opcional)")
 
-class SimpleDocumentGeneratorInput(BaseModel):
-    output_filename: str = Field(description="Nome do arquivo a criar (com extensão .docx, .xlsx, ou .pdf)")
-    content: str = Field(description="Conteúdo de texto que será o corpo do documento, separado por novas linhas.")
-    owner_id: str = Field(description="ID do usuário dono do novo documento.")
+# class SimpleDocumentGeneratorInput(BaseModel):
+#     output_filename: str = Field(description="Nome do arquivo a criar (com extensão .docx, .xlsx, ou .pdf)")
+#     content: str = Field(description="Conteúdo de texto que será o corpo do documento, separado por novas linhas.")
+#     owner_id: str = Field(description="ID do usuário dono do novo documento.")
 
 class TemplateInspectorInput(BaseModel):
     template_name: str = Field(description="Nome exato do arquivo do template .docx a ser inspecionado.")
@@ -266,35 +266,35 @@ def template_filler_tool(template_name: str, context: dict, owner_id: str, outpu
         return ToolResponse.error(message=f"Erro ao preencher o template: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
 
 
-@tool(args_schema=SimpleDocumentGeneratorInput)
-@track_performance
-def simple_document_generator_tool(output_filename: str, content: str, owner_id: str) -> Dict[str, Any]:
-    """Cria um arquivo DOCX, XLSX ou PDF a partir de um texto simples."""
-    logger.info("tool_executed", tool="simple_document_generator_tool", output_filename=output_filename)
-    db, fs = get_db(), get_gridfs()
-    try:
-        owner_oid = _to_objectid_if_possible(owner_id)
-        if not isinstance(owner_oid, ObjectId):
-            return ToolResponse.error(message=f"O owner_id '{owner_id}' fornecido não é válido.", error_code=ErrorCodes.INVALID_OBJECT_ID).to_dict()
+# @tool(args_schema=SimpleDocumentGeneratorInput)
+# @track_performance
+# def simple_document_generator_tool(output_filename: str, content: str, owner_id: str) -> Dict[str, Any]:
+#     """Cria um arquivo DOCX, XLSX ou PDF a partir de um texto simples."""
+#     logger.info("tool_executed", tool="simple_document_generator_tool", output_filename=output_filename)
+#     db, fs = get_db(), get_gridfs()
+#     try:
+#         owner_oid = _to_objectid_if_possible(owner_id)
+#         if not isinstance(owner_oid, ObjectId):
+#             return ToolResponse.error(message=f"O owner_id '{owner_id}' fornecido não é válido.", error_code=ErrorCodes.INVALID_OBJECT_ID).to_dict()
 
-        topicos = [linha.strip() for linha in content.split("\n") if linha.strip()]
-        file_format = output_filename.split(".")[-1].lower()
+#         topicos = [linha.strip() for linha in content.split("\n") if linha.strip()]
+#         file_format = output_filename.split(".")[-1].lower()
 
-        stream_generators = {"docx": criar_docx_stream, "xlsx": criar_xlsx_stream, "pdf": criar_pdf_stream}
-        generator = stream_generators.get(file_format)
-        if not generator:
-            return ToolResponse.error(message=f"Formato '{file_format}' não suportado. Use 'docx', 'xlsx' ou 'pdf'.", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
+#         stream_generators = {"docx": criar_docx_stream, "xlsx": criar_xlsx_stream, "pdf": criar_pdf_stream}
+#         generator = stream_generators.get(file_format)
+#         if not generator:
+#             return ToolResponse.error(message=f"Formato '{file_format}' não suportado. Use 'docx', 'xlsx' ou 'pdf'.", error_code=ErrorCodes.VALIDATION_ERROR).to_dict()
 
-        arquivo_stream = generator(topicos, filename=output_filename)
-        output_file_id = fs.put(arquivo_stream.getvalue(), filename=output_filename)
+#         arquivo_stream = generator(topicos, filename=output_filename)
+#         output_file_id = fs.put(arquivo_stream.getvalue(), filename=output_filename)
 
-        output_doc_meta = {"filename": output_filename, "gridfs_file_id": output_file_id, "owner_id": owner_oid, "created_at": datetime.utcnow()}
-        result = db.documents.insert_one(output_doc_meta)
+#         output_doc_meta = {"filename": output_filename, "gridfs_file_id": output_file_id, "owner_id": owner_oid, "created_at": datetime.utcnow()}
+#         result = db.documents.insert_one(output_doc_meta)
 
-        return ToolResponse.success(message=f"Documento '{output_filename}' gerado com sucesso.", data={"document_id": str(result.inserted_id), "filename": output_filename, "format": file_format}).to_dict()
-    except Exception as e:
-        logger.exception("tool_error", tool="simple_document_generator_tool", error=str(e))
-        return ToolResponse.error(message=f"Erro ao gerar documento simples: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
+#         return ToolResponse.success(message=f"Documento '{output_filename}' gerado com sucesso.", data={"document_id": str(result.inserted_id), "filename": output_filename, "format": file_format}).to_dict()
+#     except Exception as e:
+#         logger.exception("tool_error", tool="simple_document_generator_tool", error=str(e))
+#         return ToolResponse.error(message=f"Erro ao gerar documento simples: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
 
 
 @tool(args_schema=TemplateInspectorInput)
@@ -378,3 +378,38 @@ def database_query_tool(document_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("tool_error", tool="database_query_tool", error=str(e))
         return ToolResponse.error(message=f"Erro ao consultar o banco de dados: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
+
+class SaveFileInput(BaseModel):
+    filename: str = Field(description="Nome completo do arquivo a ser salvo, incluindo a extensão.")
+    content_stream: bytes = Field(description="O conteúdo do arquivo como um stream de bytes.")
+    owner_id: str = Field(description="ID do usuário dono do novo documento.")
+
+@tool(args_schema=SaveFileInput)
+@track_performance
+def save_file_tool(filename: str, content_stream: bytes, owner_id: str) -> Dict[str, Any]:
+    """Salva um arquivo (fornecido como um stream de bytes) no sistema de armazenamento (GridFS)."""
+    logger.info("tool_executed", tool="save_file_tool", filename=filename)
+    db, fs = get_db(), get_gridfs()
+    try:
+        owner_oid = _to_objectid_if_possible(owner_id)
+        if not isinstance(owner_oid, ObjectId):
+            return ToolResponse.error(message=f"O owner_id '{owner_id}' fornecido não é válido.", error_code=ErrorCodes.INVALID_OBJECT_ID).to_dict()
+
+        output_file_id = fs.put(content_stream, filename=filename)
+
+        output_doc_meta = {
+            "filename": filename,
+            "gridfs_file_id": output_file_id,
+            "owner_id": owner_oid,
+            "created_at": datetime.utcnow()
+        }
+        result = db.documents.insert_one(output_doc_meta)
+
+        return ToolResponse.success(
+            message=f"Documento '{filename}' salvo com sucesso.",
+            data={"document_id": str(result.inserted_id), "filename": filename}
+        ).to_dict()
+
+    except Exception as e:
+        logger.exception("tool_error", tool="save_file_tool", error=str(e))
+        return ToolResponse.error(message=f"Erro ao salvar o arquivo: {e}", error_code=ErrorCodes.UNKNOWN_ERROR).to_dict()
