@@ -8,7 +8,79 @@ from datetime import datetime
 from src.db.mongo import get_db, get_gridfs
 from src.tasks.ia_processor import processar_solicitacao_ia
 
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from src.config import Config
+
 chat_bp = Blueprint('chat_bp', __name__)
+
+# geração de título de conversa usando LLM
+# Usamos uma temperatura baixa para títulos mais consistentes.
+try:
+    title_generation_llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash-lite",
+        google_api_key=Config.GOOGLE_API_KEY,
+        temperature=0.3
+    )
+except Exception as e:
+    # Se falhar, definimos como None para que possamos lidar com o erro graciosamente.
+    title_generation_llm = None
+
+def generate_conversation_title(first_prompt: str) -> str:
+    """
+    Usa um LLM para gerar um título curto e descritivo para uma conversa
+    com base na primeira mensagem do usuário.
+    """
+    # Se o LLM não pôde ser inicializado, retorna um título de fallback.
+    if not title_generation_llm:
+        # Pega as primeiras 5 palavras do prompt como um fallback simples.
+        return " ".join(first_prompt.split()[:5]) + "..."
+
+    try:
+        # Prompt otimizado para a tarefa de criar títulos.
+        prompt = ChatPromptTemplate.from_template(
+            """Sua tarefa é criar um título curto, conciso e descritivo (máximo 5 palavras) para uma conversa de chat que começa com a seguinte mensagem do usuário. 
+            Responda APENAS com o título, sem aspas ou texto adicional.
+
+            Exemplo 1:
+            MENSAGEM: "Crie um relatório em docx sobre as vantagens e desvantagens da energia solar no Brasil."
+            TÍTULO GERADO: Relatório sobre Energia Solar
+
+            Exemplo 2:
+            MENSAGEM: "Use o template 'proposta_comercial.docx' para a empresa InovaTech."
+            TÍTULO GERADO: Proposta para InovaTech
+
+            Exemplo 3:
+            MENSAGEM: "Quais são as últimas tendências em inteligência artificial para 2025?"
+            TÍTULO GERADO: Tendências em IA para 2025
+
+            Exemplo 4:
+            MENSAGEM: "O que você faz?"
+            TÍTULO GERADO: Sobre Minhas Funcionalidades
+
+            Exemplo 5:
+            MENSAGEM: "Quais são os templates disponíveis?"
+            TÍTULO GERADO: Templates Disponíveis
+
+            MENSAGEM DO USUÁRIO: "{prompt}"
+            """
+        )
+        
+        chain = prompt | title_generation_llm | StrOutputParser()
+        
+        # Invoca a cadeia e limpa a resposta.
+        title = chain.invoke({"prompt": first_prompt}).strip().strip('"')
+        
+        # Garante que o título não seja excessivamente longo.
+        if len(title) > 70:
+            title = title[:67] + "..."
+
+        return title if title else "Novo Chat"
+        
+    except Exception:
+        # Em caso de qualquer erro com a IA, retorna um título de fallback.
+        return " ".join(first_prompt.split()[:5]) + "..."
 
 @chat_bp.route('/conversations', methods=['POST'])
 @jwt_required()
@@ -33,9 +105,15 @@ def send_message():
     # Se não houver um ID de conversa, cria uma nova.
     # Se houver, valida o ID e o utiliza.
     if not conversation_id_str:
+        # É uma nova conversa, vamos criar o registro e gerar o título.
+        
+        # 1. Gera o título usando a IA.
+        new_title = generate_conversation_title(prompt)
+        
+        # 2. Cria o novo documento da conversa com o título gerado.
         new_conv = {
             "user_id": ObjectId(current_user_id),
-            "title": prompt[:70] + ("..." if len(prompt) > 70 else ""),
+            "title": new_title, # <<< USA O TÍTULO GERADO
             "created_at": datetime.utcnow(),
             "last_updated_at": datetime.utcnow()
         }
@@ -85,12 +163,20 @@ def send_message():
 
     # Chama a função de processamento de IA diretamente (fluxo síncrono)
     resultado = processar_solicitacao_ia(str(msg_result.inserted_id))
+    
+    if not conversation_id_str:
+        return jsonify({
+            "mensagem": "Sua solicitação foi processada com sucesso.",
+            "conversation_id": str(conversation_id),
+            "message_id": str(msg_result.inserted_id),
+            "new_title": new_title # <<< NOVO CAMPO NA RESPOSTA
+        }), 201
 
     if resultado == "Sucesso":
         return jsonify({
             "mensagem": "Sua solicitação foi processada com sucesso.",
             "conversation_id": str(conversation_id),
-            "message_id": str(msg_result.inserted_id)
+            "message_id": str(msg_result.inserted_id),
         }), 201
     else:
         return jsonify({"erro": "Ocorreu um problema no servidor ao processar sua solicitação."}), 500
