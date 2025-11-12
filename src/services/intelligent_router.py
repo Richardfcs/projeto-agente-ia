@@ -3,8 +3,8 @@
 from typing import List, Literal, Union
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
-
+# from langchain_google_genai import ChatGoogleGenerativeAI
+from src.tasks.llm_fallback import FallbackLLM
 from src.config import Config
 
 # --- 1. Defina as "Ferramentas" que representam cada intenção ---
@@ -34,13 +34,7 @@ class GeneralChat(BaseModel):
 
 class IntelligentRouter:
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite",
-            google_api_key=Config.GOOGLE_API_KEY,
-            temperature=0  # Temperatura zero para máxima previsibilidade no roteamento
-        )
-        
-        # --- CORREÇÃO APLICADA AQUI ---
+        self.llm = FallbackLLM(temperature=0.1)
         # Em vez de with_structured_output, usamos .bind_tools() para permitir
         # que o LLM escolha entre MÚLTIPLAS ferramentas/esquemas.
         self.tools = [FillTemplate, CreateDocument, ReadDocument, GeneralChat]

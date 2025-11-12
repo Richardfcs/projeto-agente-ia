@@ -35,6 +35,7 @@ from src.tasks.tools import (
     template_filler_tool,
     file_reader_tool,
 )
+from src.tasks.llm_fallback import FallbackLLM
 from src.utils.observability import log_with_context
 
 from src.utils.markdown_converter import convert_markdown_to_docx_stream, convert_markdown_to_pdf_stream
@@ -43,19 +44,27 @@ from src.tasks.tools import save_file_tool # Importe a nova ferramenta
 
 logger = log_with_context(component="GraphNodes")
 
-# --- Inicialização do LLM (Gemini) ---
+# --- Inicialização Antiga do LLM (Gemini ) ---
 # Instanciamos o LLM uma única vez para ser reutilizado por todos os nós.
 # `convert_system_message_to_human=True` é uma boa prática para compatibilidade com Gemini.
+# try:
+#     llm = ChatGoogleGenerativeAI(
+#         model="gemini-2.5-flash-lite",
+#         google_api_key=Config.GOOGLE_API_KEY,
+#         convert_system_message_to_human=True,
+#         temperature=0.7,
+#     )
+#     logger.info("LLM Gemini inicializado com sucesso.")
+# except Exception as e:
+#     logger.error("Falha ao inicializar o LLM Gemini. Verifique a GOOGLE_API_KEY.", error=str(e))
+#     llm = None
+
 try:
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
-        google_api_key=Config.GOOGLE_API_KEY,
-        convert_system_message_to_human=True,
-        temperature=0.7,
-    )
-    logger.info("LLM Gemini inicializado com sucesso.")
+    # Cria uma instância do nosso LLM com fallback.
+    llm = FallbackLLM(temperature=0.7)
+    logger.info("LLM com Fallback inicializado com sucesso.")
 except Exception as e:
-    logger.error("Falha ao inicializar o LLM Gemini. Verifique a GOOGLE_API_KEY.", error=str(e))
+    logger.error("Falha ao inicializar o LLM com Fallback.", error=str(e))
     llm = None
 
 # --- Helper Functions (Extraídas do antigo ia_processor) ---

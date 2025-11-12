@@ -8,9 +8,10 @@ from datetime import datetime
 from src.db.mongo import get_db, get_gridfs
 from src.tasks.ia_processor import processar_solicitacao_ia
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from src.tasks.llm_fallback import FallbackLLM
 from src.config import Config
 
 chat_bp = Blueprint('chat_bp', __name__)
@@ -18,11 +19,7 @@ chat_bp = Blueprint('chat_bp', __name__)
 # geração de título de conversa usando LLM
 # Usamos uma temperatura baixa para títulos mais consistentes.
 try:
-    title_generation_llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
-        google_api_key=Config.GOOGLE_API_KEY,
-        temperature=0.3
-    )
+    title_generation_llm = FallbackLLM(temperature=0.3)
 except Exception as e:
     # Se falhar, definimos como None para que possamos lidar com o erro graciosamente.
     title_generation_llm = None
