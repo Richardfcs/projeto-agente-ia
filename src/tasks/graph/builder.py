@@ -96,14 +96,14 @@ def build_graph():
     app = workflow.compile()
     
     # Adicionar um método para gerar uma imagem visual do grafo (ótimo para documentação e depuração)
-    try:
-        # Tenta gerar a imagem se as dependências estiverem instaladas
-        # (pip install pygraphviz)
-        app.get_graph().draw_png("ia_workflow_graph.png")
-        print("Diagrama do grafo de IA salvo em 'ia_workflow_graph.png'")
-    except ImportError:
-        print("PyGraphviz não instalado. Pule a geração da imagem do grafo.")
-        print("Para visualizar o grafo, instale: pip install pygraphviz")
+    # try:
+    #     # Tenta gerar a imagem se as dependências estiverem instaladas
+    #     # (pip install pygraphviz)
+    #     app.get_graph().draw_png("ia_workflow_graph.png")
+    #     print("Diagrama do grafo de IA salvo em 'ia_workflow_graph.png'")
+    # except ImportError:
+    #     print("PyGraphviz não instalado. Pule a geração da imagem do grafo.")
+    #     print("Para visualizar o grafo, instale: pip install pygraphviz")
     
     return app
 

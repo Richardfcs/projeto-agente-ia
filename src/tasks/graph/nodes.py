@@ -88,8 +88,6 @@ def router_node(state: GraphState) -> Dict[str, Any]:
     has_attachment = bool(state.get("input_document_id"))
     
     # Roteia e obtém uma classe Pydantic como resultado
-    routed_tool = router.route(state["prompt"], state["conversation_history"], has_attachment)
-    
     tool_name, tool_args = router.route(state["prompt"], state["conversation_history"], has_attachment)
     
     logger.info(f"Intenção roteada para: {tool_name} com args: {tool_args}")
@@ -122,12 +120,8 @@ def fill_template_flow_node(state: GraphState) -> Dict[str, Any]:
     # Se não houver campos, podemos pular direto para o preenchimento com um JSON vazio.
     if not required_fields:
         logger.info("Template não tem placeholders. Gerando documento vazio.")
-        filler_result = template_filler_tool.invoke({
-            "template_name": template_name,
-            "context": {},
-            "owner_id": state["user_id"]
-        })
-        return {"tool_output": filler_result}
+        suggested_filename = f"{template_name.split('.')[0]}_{topic.replace(' ', '_')[:20]}.docx"
+        return {"generation": {}, "required_fields": [], "suggested_filename": suggested_filename}
 
     # --- PROMPT DE EXTRAÇÃO E GERAÇÃO (VERSÃO ESPECIALISTA v2) ---
     prompt_template = f"""
@@ -426,12 +420,17 @@ def general_chat_flow_node(state: GraphState) -> Dict[str, Any]:
     """
     logger.info("Executando general_chat_flow_node", conversation_id=state["conversation_id"])
     
-    # Caso especial: se a intenção era listar templates, usamos a ferramenta
-    if state.get("intent") == "LISTAR_TEMPLATES":
+    # --- CORREÇÃO APLICADA AQUI ---
+    # Inspeciona o pedido original do usuário que foi passado pelo roteador.
+    user_request = state["routed_tool_call"]["args"].get("user_request", "").lower()
+    
+    # Verifica por palavras-chave relacionadas a templates.
+    if any(word in user_request for word in ["template", "templates", "modelo", "modelos"]):
+        logger.info("Detectada intenção de listar templates dentro do chat geral.")
         lister_result = template_lister_tool.invoke({})
         templates = lister_result.get("data", {}).get("templates", [])
         if templates:
-            response_text = "Claro! Os templates disponíveis são:\n- " + "\n- ".join(templates)
+            response_text = "Claro! Os templates disponíveis para uso são:\n- " + "\n- ".join(templates)
         else:
             response_text = "No momento, não há templates disponíveis no sistema."
         return {"final_response": response_text}
@@ -497,6 +496,9 @@ def validate_and_clarify_node(state: GraphState) -> Dict[str, Any]:
     para o usuário. Caso contrário, invoca a ferramenta de preenchimento.
     """
     logger.info("Executando validate_and_clarify_node", conversation_id=state["conversation_id"])
+    
+    if state.get("tool_output") and state["tool_output"].get("status") == "error":
+        return {}
     
     generated_json = state.get("generation")
     if not isinstance(generated_json, dict):
