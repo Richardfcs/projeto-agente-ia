@@ -144,32 +144,78 @@ paths:
           description: Usuário não encontrado.
 
   # ===================================================================
-  # Conversations & Chat (Sem alterações nesta seção)
+  # Conversations & Chat
   # ===================================================================
+
+  /api/chat/conversations/init:
+    post:
+      tags: [Conversations & Chat]
+      summary: Iniciar uma nova conversa (Rascunho)
+      description: Cria uma conversa vazia e retorna o ID imediatamente. Essencial para permitir o upload de arquivos antes do envio da primeira mensagem.
+      responses:
+        '201':
+          description: Conversa rascunho criada com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversation_id:
+                    type: string
+                    example: "65df..."
+                  title:
+                    type: string
+                    example: "Nova Conversa"
+        '401':
+          description: Não autorizado.
+  
   /api/chat/conversations:
     post:
       tags: [Conversations & Chat]
       summary: Enviar uma mensagem para a IA
+      description: Envia um prompt para uma conversa existente ou nova. Se for a primeira mensagem, gera e retorna um título inteligente.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, properties: {prompt: {type: string}, conversation_id: {type: string}, input_document_id: {type: string}}}
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt:
+                  type: string
+                  example: "Crie um relatório sobre IA."
+                conversation_id:
+                  type: string
+                  description: "Opcional. Se não enviado, cria uma nova conversa (fallback)."
+                input_document_id:
+                  type: string
+                  description: "Opcional. ID de um documento previamente enviado via /upload."
       responses:
         '201':
           description: Solicitação processada com sucesso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mensagem:
+                    type: string
+                    example: "Sua solicitação foi processada com sucesso."
+                  conversation_id:
+                    type: string
+                  message_id:
+                    type: string
+                  new_title:
+                    type: string
+                    description: "Retornado apenas na primeira mensagem da conversa para atualizar a UI do frontend."
+                    example: "Relatório sobre IA"
         '400':
-          description: Prompt ausente.
+          description: Prompt ausente ou dados inválidos.
         '401':
           description: Não autorizado.
-    get:
-      tags: [Conversations & Chat]
-      summary: Listar todas as conversas do usuário
-      responses:
-        '200':
-          description: Uma lista de conversas.
-        '401':
-          description: Não autorizado.
+        '500':
+          description: Erro interno no processamento da IA.
   
   /api/chat/conversations/{conversation_id}:
     get:
