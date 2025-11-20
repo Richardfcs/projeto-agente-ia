@@ -4,11 +4,10 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from bson.errors import InvalidId
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.db.mongo import get_db, get_gridfs
 from src.tasks.ia_processor import processar_solicitacao_ia
 
-# from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from src.tasks.llm_fallback import FallbackLLM
@@ -16,8 +15,7 @@ from src.config import Config
 
 chat_bp = Blueprint('chat_bp', __name__)
 
-# geração de título de conversa usando LLM
-# Usamos uma temperatura baixa para títulos mais consistentes.
+# --- CONFIGURAÇÃO DE TÍTULO COM FALLBACK ---
 try:
     title_generation_llm = FallbackLLM(temperature=0.3)
 except Exception as e:
@@ -26,8 +24,7 @@ except Exception as e:
 
 def generate_conversation_title(first_prompt: str) -> str:
     """
-    Usa um LLM para gerar um título curto e descritivo para uma conversa
-    com base na primeira mensagem do usuário.
+    Usa um LLM para gerar um título curto e descritivo.
     """
     # Se o LLM não pôde ser inicializado, retorna um título de fallback.
     if not title_generation_llm:
@@ -79,57 +76,95 @@ def generate_conversation_title(first_prompt: str) -> str:
         # Em caso de qualquer erro com a IA, retorna um título de fallback.
         return " ".join(first_prompt.split()[:5]) + "..."
 
+# --- NOVA ROTA PARA CORRIGIR O BUG DO UPLOAD ---
+@chat_bp.route('/conversations/init', methods=['POST'])
+@jwt_required()
+def init_conversation():
+    """
+    Cria uma conversa vazia (rascunho) e retorna o ID imediatamente.
+    Essencial para permitir upload de arquivos antes da primeira mensagem.
+    """
+    current_user_id = get_jwt_identity()
+    db = get_db()
+
+    new_conv = {
+        "user_id": ObjectId(current_user_id),
+        "title": "Nova Conversa", # Título provisório
+        "created_at": datetime.utcnow(),
+        "last_updated_at": datetime.utcnow(),
+        "is_empty": True # Marca como rascunho
+    }
+    result = db.conversations.insert_one(new_conv)
+    
+    return jsonify({
+        "conversation_id": str(result.inserted_id),
+        "title": "Nova Conversa"
+    }), 201
+
 @chat_bp.route('/conversations', methods=['POST'])
 @jwt_required()
 def send_message():
     """
-    Inicia uma nova conversa ou envia uma mensagem para uma existente.
-    Agora com a capacidade de anexar um documento de entrada.
+    Envia mensagem. Lida com a geração de título na PRIMEIRA mensagem real,
+    seja em um novo chat direto ou em um chat iniciado via /init.
     """
     current_user_id = get_jwt_identity()
     data = request.get_json()
 
     # Pega os dados do corpo da requisição
     prompt = data.get('prompt')
-    conversation_id_str = data.get('conversation_id') # Opcional
-    input_document_id_str = data.get('input_document_id') # Opcional
+    conversation_id_str = data.get('conversation_id') 
+    input_document_id_str = data.get('input_document_id')
 
     if not prompt:
         return jsonify({"erro": "O campo 'prompt' é obrigatório"}), 400
 
     db = get_db()
+    new_title_generated = None
     
-    # Se não houver um ID de conversa, cria uma nova.
-    # Se houver, valida o ID e o utiliza.
+    # 1. Resolução do ID da Conversa
     if not conversation_id_str:
-        # É uma nova conversa, vamos criar o registro e gerar o título.
-        
-        # 1. Gera o título usando a IA.
-        new_title = generate_conversation_title(prompt)
-        
-        # 2. Cria o novo documento da conversa com o título gerado.
+        # Fallback: Criação direta (sem chamar /init antes)
         new_conv = {
             "user_id": ObjectId(current_user_id),
-            "title": new_title, # <<< USA O TÍTULO GERADO
+            "title": "Nova Conversa",
             "created_at": datetime.utcnow(),
-            "last_updated_at": datetime.utcnow()
+            "last_updated_at": datetime.utcnow(),
+            "is_empty": True
         }
         result = db.conversations.insert_one(new_conv)
         conversation_id = result.inserted_id
     else:
         try:
             conversation_id = ObjectId(conversation_id_str)
-            # Verificação de segurança: garante que a conversa pertence ao usuário logado
-            conv_check = db.conversations.find_one({
+            conv = db.conversations.find_one({
                 "_id": conversation_id, 
                 "user_id": ObjectId(current_user_id)
             })
-            if not conv_check:
+            if not conv:
                 return jsonify({"erro": "Conversa não encontrada ou acesso negado"}), 404
         except InvalidId:
             return jsonify({"erro": "ID de conversa inválido"}), 400
 
-    # Constrói o documento da mensagem do usuário
+    # 2. Lógica de Título para Primeira Mensagem
+    # Verifica se é a primeira mensagem para gerar o título definitivo
+    msg_count = db.messages.count_documents({"conversation_id": conversation_id})
+    
+    if msg_count == 0:
+        new_title_generated = generate_conversation_title(prompt)
+        
+        db.conversations.update_one(
+            {"_id": conversation_id},
+            {
+                "$set": {
+                    "title": new_title_generated,
+                    "is_empty": False, # Remove flag de rascunho
+                    "last_updated_at": datetime.utcnow()
+                }
+            }
+        )
+
+    # 3. Criação da Mensagem
     user_message = {
         "conversation_id": conversation_id,
         "role": "user",
@@ -148,51 +183,59 @@ def send_message():
                 "owner_id": ObjectId(current_user_id)
             })
             if not doc_check:
-                return jsonify({"erro": "Documento anexado não encontrado ou acesso negado"}), 404
-            
-            # Adiciona a referência ao documento de metadados na mensagem
+                return jsonify({"erro": "Documento anexado não encontrado"}), 404
             user_message["input_document_id"] = doc_id
         except InvalidId:
-            return jsonify({"erro": "ID de documento anexado inválido"}), 400
+            return jsonify({"erro": "ID de documento inválido"}), 400
 
     # Insere a mensagem final no banco de dados
     msg_result = db.messages.insert_one(user_message)
 
-    # Chama a função de processamento de IA diretamente (fluxo síncrono)
+    # 4. Processamento IA
     resultado = processar_solicitacao_ia(str(msg_result.inserted_id))
+
+    # Monta resposta
+    response_data = {
+        "mensagem": "Sua solicitação foi processada com sucesso.",
+        "conversation_id": str(conversation_id),
+        "message_id": str(msg_result.inserted_id)
+    }
     
-    if not conversation_id_str:
-        return jsonify({
-            "mensagem": "Sua solicitação foi processada com sucesso.",
-            "conversation_id": str(conversation_id),
-            "message_id": str(msg_result.inserted_id),
-            "new_title": new_title # <<< NOVO CAMPO NA RESPOSTA
-        }), 201
+    if new_title_generated:
+        response_data["new_title"] = new_title_generated
 
     if resultado == "Sucesso":
-        return jsonify({
-            "mensagem": "Sua solicitação foi processada com sucesso.",
-            "conversation_id": str(conversation_id),
-            "message_id": str(msg_result.inserted_id),
-        }), 201
+        return jsonify(response_data), 201
     else:
         return jsonify({"erro": "Ocorreu um problema no servidor ao processar sua solicitação."}), 500
 
 @chat_bp.route('/conversations', methods=['GET'])
 @jwt_required()
 def get_conversations():
-    """Lista todas as conversas do usuário logado."""
+    """Lista conversas e limpa rascunhos vazios antigos."""
     current_user_id = get_jwt_identity()
     db = get_db()
     
+    # Limpeza de rascunhos com mais de 1 hora
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+    db.conversations.delete_many({
+        "user_id": ObjectId(current_user_id),
+        "is_empty": True,
+        "created_at": {"$lt": one_hour_ago}
+    })
+    
     convs_cursor = db.conversations.find(
-        {"user_id": ObjectId(current_user_id)}
+        {
+            "user_id": ObjectId(current_user_id),
+            "is_empty": {"$ne": True} # Não lista rascunhos vazios
+        }
     ).sort("last_updated_at", -1)
     
     conversations = []
     for conv in convs_cursor:
         conv['_id'] = str(conv['_id'])
         conv['user_id'] = str(conv['user_id'])
+        conv.pop('is_empty', None)
         conversations.append(conv)
         
     return jsonify(conversations)
@@ -224,7 +267,6 @@ def get_conversation_history(conversation_id_str):
     
     messages = []
     for msg in msgs_cursor:
-        # --- LÓGICA DE CONVERSÃO CORRIGIDA E MAIS ROBUSTA ---
         # Itera sobre todas as chaves e valores do documento da mensagem
         for key, value in msg.items():
             # Se o valor for do tipo ObjectId, converte para string
@@ -232,7 +274,6 @@ def get_conversation_history(conversation_id_str):
                 msg[key] = str(value)
         
         messages.append(msg)
-    # --- FIM DA CORREÇÃO ---
         
     return jsonify(messages)
 
@@ -280,7 +321,6 @@ def delete_conversation(conversation_id):
         for gridfs_id in gridfs_ids_to_delete:
             if gridfs_id:
                 fs.delete(gridfs_id)
-    # --- FIM DA NOVA LÓGICA ---
 
     # 4. Excluir a conversa e as mensagens (como antes)
     db.messages.delete_many({"conversation_id": conv_oid})
