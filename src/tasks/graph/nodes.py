@@ -343,15 +343,31 @@ def create_document_flow_node(state: GraphState) -> Dict[str, Any]:
         # TAREFA 1: CADEIA PARA GERAR APENAS O CONTEÚDO
         content_prompt = ChatPromptTemplate.from_template(
             """
-            **PERSONA:** Você é um Redator Especialista que estrutura todo o seu conteúdo usando Markdown para garantir uma formatação rica.
-            
-            **TAREFA:** Escreva um conteúdo textual completo e detalhado sobre o tópico: "{topic}".
-            
-            **REGRAS DE FORMATAÇÃO DO CONTEÚDO:**
-            - Se o formato de destino final for `docx` ou `pdf`, VOCÊ DEVE USAR SINTAXE MARKDOWN (títulos com '#', negrito com '**', listas com '-',  `---` para criar linhas de separação, `| Cabeçalho |` ... para criar tabelas simples, ``` para blocos de código e `código inline` etc.).
-            - Se o formato de destino final for `xlsx`, sua saída deve ser texto tabular (cabeçalho na primeira linha, colunas separadas por ';', e `\\n` para novas linhas).
-            
-            **IMPORTANTE:** Sua resposta deve conter APENAS o conteúdo bruto, sem nenhum comentário ou texto introdutório.
+            **CONTEXTO DA TAREFA:**
+            Você deve gerar o conteúdo para um arquivo do tipo: **{file_type}**.
+            O tópico é: "{topic}".
+
+            **INSTRUÇÕES CRÍTICAS DE FORMATAÇÃO (SIGA ESTRITAMENTE):**
+
+            **CASO 1: SE O TIPO FOR `xlsx` (PLANILHA):**
+            - **NÃO USE MARKDOWN.** Não use `|`, `-`, `**` ou tabelas desenhadas com texto.
+            - Sua saída deve ser **DADOS CSV PUROS** (valores separados por ponto e vírgula).
+            - Use ponto e vírgula (`;`) como separador de colunas.
+            - Use uma nova linha para cada linha de dados.
+            - A primeira linha DEVE ser o cabeçalho.
+            - Exemplo de Saída Correta:
+              `Nome;Idade;Cargo`
+              `João;30;Analista`
+              `Maria;25;Gerente`
+
+            **CASO 2: SE O TIPO FOR `docx` OU `pdf` (DOCUMENTO DE TEXTO):**
+            - **USE MARKDOWN RICO.**
+            - Use `#` para títulos, `**` para negrito, `-` para listas.
+            - Use tabelas Markdown (`| Col | Col |`) se precisar apresentar dados.
+            - Escreva parágrafos completos e bem estruturados.
+
+            **SUA RESPOSTA:**
+            Gere APENAS o conteúdo do corpo do arquivo, seguindo a formatação acima correspondente ao tipo **{file_type}**.
             """
         )
         content_chain = content_prompt | llm | StrOutputParser()
